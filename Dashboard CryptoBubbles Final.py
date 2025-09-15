@@ -7,7 +7,6 @@
 
 # Funcionou tudo dinamicamente
 
-
 from io import BytesIO
 
 import pandas as pd
@@ -16,27 +15,23 @@ import streamlit as st
 
 URL = "https://cryptobubbles.net/backend/data/bubbles1000.usd.json"
 
-
 # ----------------------------
 # Funções auxiliares
 # ----------------------------
-@st.cache_data
+@st.cache_data(ttl=60)  # Cache por 1 minuto
 def obter_dados(url=URL):
     response = requests.get(url)
     response.raise_for_status()
     return response.json()
 
-
 def normalizar_json(dados):
     return pd.json_normalize(dados, sep=".")
-
 
 def converter_para_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         df.to_excel(writer, index=False, sheet_name="Dados")
     return output.getvalue()
-
 
 def human_format(num):
     if num is None or pd.isna(num):
@@ -51,7 +46,6 @@ def human_format(num):
     else:
         return f"{num:,.2f}"
 
-
 def color_performance(val):
     if pd.isna(val):
         return ""
@@ -63,21 +57,23 @@ def color_performance(val):
     else:
         return ""
 
-
 # ----------------------------
 # Configuração Streamlit
 # ----------------------------
 st.set_page_config(page_title="Crypto Dashboard BI", layout="wide")
-st.markdown(
-    """
-<style>
-.main { background-color: #0e1117; color: white; }
-h1,h2,h3,h4 { color: #f5f5f5 !important; }
-.stDataFrame table { background-color: #1e2229; color: white; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
+# Tema dark agora configurado via .streamlit/config.toml - CSS manual comentado como backup
+# st.markdown(
+#     """
+#     <style>
+#     .main { background-color: #0e1117 !important; color: white !important; }
+#     h1, h2, h3, h4 { color: #f5f5f5 !important; }
+#     .stDataFrame table { background-color: #1e2229 !important; color: white !important; }
+#     .stApp { background-color: #0e1117 !important; }
+#     .stButton>button { background-color: #1e2229 !important; color: white !important; }
+#     </style>
+#     """,
+#     unsafe_allow_html=True
+# )
 
 st.title("💼 Dashboard Executivo - Criptomoedas")
 st.markdown("📊 Fonte: [CryptoBubbles API](https://cryptobubbles.net/)")
@@ -87,7 +83,7 @@ st.markdown("📊 Fonte: [CryptoBubbles API](https://cryptobubbles.net/)")
 # ----------------------------
 json_data = obter_dados()
 df = normalizar_json(json_data)
-df_total = df
+df_total = df  # Armazena os dados completos antes de aplicar filtros
 if "marketcap" in df.columns:
     df = df[df["marketcap"] >= 100_000_000]
 
@@ -128,14 +124,12 @@ if not st.session_state.slider_values:
             max_val = float(df[c].max())
             st.session_state.slider_values[c] = (min_val, max_val)
 
-
 # Callback para restaurar chaves default
 def restore_keys_callback():
     st.session_state.selected_keys = default_keys.copy()
     st.session_state.multiselect_key_counter += 1
     st.session_state.slider_values = {}
     st.session_state.update_inputs = True  # Sinaliza a atualização
-
 
 # Callback para restaurar filtros default
 def restore_filters_callback():
@@ -145,7 +139,6 @@ def restore_filters_callback():
             max_val = float(df[c].max())
             st.session_state.slider_values[c] = (min_val, max_val)
     st.session_state.update_inputs = True  # Sinaliza a atualização
-
 
 # Botões usam on_click com callbacks
 st.sidebar.button(
@@ -195,9 +188,9 @@ for c in chaves_selecionadas:
             ):
                 st.session_state.slider_values[key] = (min_input, max_input)
             elif min_input is not None and max_input is None:
-                st.session_state.slider_values[key] = (min_input, max_input)
+                st.session_state.slider_values[key] = (min_input, max_val_df)
             elif max_input is not None and min_input is None:
-                st.session_state.slider_values[key] = (min_input, max_input)
+                st.session_state.slider_values[key] = (min_val_df, max_input)
 
         # Sliders e number_inputs para cada coluna
         selected_range = st.sidebar.slider(
@@ -206,7 +199,6 @@ for c in chaves_selecionadas:
             max_value=max_val_df,
             value=(current_min, current_max),
             key=f"{c}_slider",
-            # A callback do slider atualiza o estado de forma transparente
             on_change=lambda c=c: st.session_state.slider_values.update(
                 {c: st.session_state[f"{c}_slider"]}
             ),
@@ -264,32 +256,25 @@ for k in perf_keys:
 # Resultado da Consulta Multi-Nível
 # ----------------------------
 st.markdown("## 🔎 Resultado da Consulta Multi-Nível")
+# Criar df_display diretamente de df_filtrado, preservando todas as linhas
 df_display = df_filtrado.copy()
 
-# Garantir que colunas numéricas sejam float para sorting
+# Garantir que colunas numéricas sejam float para sorting, tratando NaN
 for col in ["marketcap", "volume", "price"]:
     if col in df_display.columns:
-        df_display[col] = pd.to_numeric(
-            df_display[col], errors="coerce", downcast="float"
-        )
+        df_display[col] = pd.to_numeric(df_display[col], errors="coerce", downcast="float").fillna(0)
 
 # Criar colunas formatadas para exibição legível
 for col in ["marketcap", "volume", "price"]:
     if col in df_display.columns:
         df_display[f"{col}_formatted"] = df_display[col].apply(human_format)
 
-# Para performance, manter float com 2 casas
+# Tratar todas as colunas de performance, preenchendo NaN com "" para exibição
 for k in perf_keys:
     if k in df_display.columns:
-        df_display[k] = pd.to_numeric(df_display[k], errors="coerce").round(2)
+        df_display[k] = df_display[k].fillna("")
 
-# Eliminar colunas _float
-for k in perf_keys:
-    float_col = k + "_float"
-    if float_col in df_display.columns:
-        df_display.drop(columns=[float_col], inplace=True)
-
-# Renomear colunas performance.*
+# Renomear colunas performance.* sem alterar o DataFrame subjacente
 renomear = {
     "performance.min1": "perf.min1",
     "performance.min5": "perf.min5",
@@ -302,18 +287,24 @@ renomear = {
     "performance.month3": "perf.month3",
     "performance.year": "perf.year",
 }
-df_display.rename(columns=renomear, inplace=True)
+df_display = df_display.rename(columns=renomear)
+
+# Eliminar colunas _float após uso
+for k in perf_keys:
+    float_col = k + "_float"
+    if float_col in df_display.columns:
+        df_display.drop(columns=[float_col], inplace=True)
 
 # Configuração de colunas
 column_config = {}
-perf_novas = [
-    new_col for old_col, new_col in renomear.items() if old_col in df_filtrado.columns
-]
+perf_novas = [new_col for old_col, new_col in renomear.items() if old_col in df_filtrado.columns]
 
 # Para performance
 for col in perf_novas:
     if col in df_display.columns:
-        column_config[col] = st.column_config.NumberColumn(format="%.2f")
+        column_config[col] = st.column_config.TextColumn(
+            default="",  # Permite exibir "" para NaN
+        )
 
 # Para marketcap, volume, price
 for col in ["marketcap", "volume", "price"]:
@@ -521,9 +512,7 @@ if not df_total.empty:
 
     # Calcular estatísticas com colunas disponíveis
     mean_values = df_top_cryptos[perf_keys_available].mean(numeric_only=True).round(2)
-    median_values = (
-        df_top_cryptos[perf_keys_available].median(numeric_only=True).round(2)
-    )
+    median_values = df_top_cryptos[perf_keys_available].median(numeric_only=True).round(2)
     std_values = df_top_cryptos[perf_keys_available].std(numeric_only=True).round(2)
     min_values = df_top_cryptos[perf_keys_available].min(numeric_only=True).round(2)
     max_values = df_top_cryptos[perf_keys_available].max(numeric_only=True).round(2)

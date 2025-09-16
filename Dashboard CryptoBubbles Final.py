@@ -1,5 +1,4 @@
-
-import time  # Importar a biblioteca 'time'
+import time
 from io import BytesIO
 
 import pandas as pd
@@ -12,7 +11,7 @@ URL = "https://cryptobubbles.net/backend/data/bubbles1000.usd.json"
 # ----------------------------
 # Funções auxiliares
 # ----------------------------
-@st.cache_data(ttl=60)  # Cache por 1 minuto
+@st.cache_data(ttl=60)
 def obter_dados(url=URL):
     response = requests.get(url)
     response.raise_for_status()
@@ -20,7 +19,9 @@ def obter_dados(url=URL):
 
 
 def normalizar_json(dados):
-    return pd.json_normalize(dados, sep=".")
+    df = pd.json_normalize(dados, sep=".")
+    df["rank"] = df["marketcap"].rank(method="min", ascending=False).astype(int)
+    return df
 
 
 def converter_para_excel(df):
@@ -108,13 +109,16 @@ if not st.session_state.slider_values:
         if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
             min_val = float(df_total[c].min())
             max_val = float(df_total[c].max())
+            if c == "marketcap":
+                min_val = 100_000_000.0
+                max_val = max_val * 1.1
+            elif c != "price" and c != "dominance":
+                min_val = min_val * 0.9 if min_val > 0 else min_val * 1.1
+                max_val = max_val * 1.1 if max_val > 0 else max_val * 0.9
+            elif c == "dominance":
+                min_val = 0.0
+                max_val = max_val * 1.1
             st.session_state.slider_values[c] = (min_val, max_val)
-    if "marketcap" in st.session_state.slider_values:
-        st.session_state.slider_values["marketcap"] = (
-            100_000_000.0,
-            st.session_state.slider_values["marketcap"][1],
-        )
-
     if "price" in df_total.columns:
         max_price = df_total["price"].max() * 1.1
         st.session_state.slider_values["price"] = (0.0, max_price)
@@ -134,13 +138,16 @@ def restore_filters_callback():
         if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
             min_val = float(df_total[c].min())
             max_val = float(df_total[c].max())
+            if c == "marketcap":
+                min_val = 100_000_000.0
+                max_val = max_val * 1.1
+            elif c != "price" and c != "dominance":
+                min_val = min_val * 0.9 if min_val > 0 else min_val * 1.1
+                max_val = max_val * 1.1 if max_val > 0 else max_val * 0.9
+            elif c == "dominance":
+                min_val = 0.0
+                max_val = max_val * 1.1
             st.session_state.slider_values[c] = (min_val, max_val)
-    if "marketcap" in st.session_state.slider_values:
-        st.session_state.slider_values["marketcap"] = (
-            100_000_000.0,
-            st.session_state.slider_values["marketcap"][1],
-        )
-
     if "price" in df_total.columns:
         max_price = df_total["price"].max() * 1.1
         st.session_state.slider_values["price"] = (0.0, max_price)
@@ -173,9 +180,18 @@ for c in chaves_selecionadas:
         min_val_df = float(df_total[c].min())
         max_val_df = float(df_total[c].max())
 
-        if c == "price":
+        if c == "marketcap":
+            min_val_df = 100_000_000.0
+            max_val_df = max_val_df * 1.1
+        elif c != "price" and c != "dominance":
+            min_val_df = min_val_df * 0.9 if min_val_df > 0 else min_val_df * 1.1
+            max_val_df = max_val_df * 1.1 if max_val_df > 0 else max_val_df * 0.9
+        elif c == "price":
             min_val_df = 0.0
             max_val_df = df_total["price"].max() * 1.1
+        elif c == "dominance":
+            min_val_df = 0.0
+            max_val_df = max_val_df * 1.1
 
         current_min, current_max = st.session_state.slider_values.get(
             c, (min_val_df, max_val_df)
@@ -191,9 +207,22 @@ for c in chaves_selecionadas:
                 float(df_total[key].max()) if key in df_total.columns else max_val_df
             )
 
-            if key == "price":
+            if key == "marketcap":
+                min_val_df_ = 100_000_000.0
+                max_val_df_ = max_val_df_ * 1.1
+            elif key != "price" and key != "dominance":
+                min_val_df_ = (
+                    min_val_df_ * 0.9 if min_val_df_ > 0 else min_val_df_ * 1.1
+                )
+                max_val_df_ = (
+                    max_val_df_ * 1.1 if max_val_df_ > 0 else max_val_df_ * 0.9
+                )
+            elif key == "price":
                 min_val_df_ = 0.0
                 max_val_df_ = df_total["price"].max() * 1.1
+            elif key == "dominance":
+                min_val_df_ = 0.0
+                max_val_df_ = max_val_df_ * 1.1
 
             if (
                 min_input is not None
@@ -320,7 +349,7 @@ if "price" in df_display_final.columns:
         df_display_final["price"], errors="coerce", downcast="float"
     )
     column_config["price"] = st.column_config.NumberColumn(
-        label="Price", format="$ %.2f"
+        label="Price", format="$ %.8f"
     )
 if "marketcap" in df_display_final.columns:
     df_display_final["marketcap"] = pd.to_numeric(
@@ -367,7 +396,7 @@ intervalos = {
     "performance.month": "Mês",
     "performance.month3": "3 Meses",
 }
-colunas_essenciais = ["name", "symbol", "price"]
+colunas_essenciais = ["name", "symbol", "price", "rank"]
 colunas_disponiveis = [col for col in colunas_essenciais if col in df_filtrado.columns]
 
 for key, label in intervalos.items():
@@ -381,13 +410,13 @@ for key, label in intervalos.items():
             st.markdown(f"### 🟢 Maiores Altas - {label}")
             for _, r in top_altas.iterrows():
                 st.markdown(
-                    f"- {r.get('name', 'N/A')} ({r.get('symbol', 'N/A')}) - {r.get(key, 0):.2f}%"
+                    f"- {r.get('name', 'N/A')} ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
                 )
         with colB:
             st.markdown(f"### 🔴 Maiores Baixas - {label}")
             for _, r in top_baixas.iterrows():
                 st.markdown(
-                    f"- {r.get('name', 'N/A')} ({r.get('symbol', 'N/A')}) - {r.get(key, 0):.2f}%"
+                    f"- {r.get('name', 'N/A')} ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
                 )
     else:
         st.warning(f"⚠️ Dados insuficientes para alertas de {label}.")
@@ -406,11 +435,18 @@ if not df_display_final.empty:
 # ----------------------------
 st.markdown("## 📊 Estatísticas de Desempenho")
 if not df.empty:
-    mean_values = df[perf_keys].mean(numeric_only=True).round(2)
-    median_values = df[perf_keys].median(numeric_only=True).round(2)
-    std_values = df[perf_keys].std(numeric_only=True).round(2)
-    min_values = df[perf_keys].min(numeric_only=True).round(2)
-    max_values = df[perf_keys].max(numeric_only=True).round(2)
+    df_no_stablecoins = df[df["stable"] == False].copy()
+    perf_keys_available = [k for k in perf_keys if k in df_no_stablecoins.columns]
+
+    mean_values = (
+        df_no_stablecoins[perf_keys_available].mean(numeric_only=True).round(2)
+    )
+    median_values = (
+        df_no_stablecoins[perf_keys_available].median(numeric_only=True).round(2)
+    )
+    std_values = df_no_stablecoins[perf_keys_available].std(numeric_only=True).round(2)
+    min_values = df_no_stablecoins[perf_keys_available].min(numeric_only=True).round(2)
+    max_values = df_no_stablecoins[perf_keys_available].max(numeric_only=True).round(2)
 
     performance_labels = [
         "Min15",
@@ -455,6 +491,7 @@ else:
 # ----------------------------
 st.markdown("## 📊 Estatísticas de Desempenho Filtrada")
 if not df_total.empty:
+    df_no_stablecoins_filtered = df_total[df_total["stable"] == False].copy()
     num_cryptos = st.number_input(
         "Número de criptomoedas a considerar (1-1000)",
         min_value=1,
@@ -463,11 +500,11 @@ if not df_total.empty:
         key="num_cryptos_input",
     )
     df_top_cryptos = (
-        df_total.nlargest(int(num_cryptos), "marketcap", keep="all")
-        if "marketcap" in df_total.columns
-        else df_total
+        df_no_stablecoins_filtered.nlargest(int(num_cryptos), "marketcap", keep="all")
+        if "marketcap" in df_no_stablecoins_filtered.columns
+        else df_no_stablecoins_filtered
     )
-    perf_keys_available = [k for k in perf_keys if k in df_total.columns]
+    perf_keys_available = [k for k in perf_keys if k in df_top_cryptos.columns]
     mean_values = df_top_cryptos[perf_keys_available].mean(numeric_only=True).round(2)
     median_values = (
         df_top_cryptos[perf_keys_available].median(numeric_only=True).round(2)
@@ -517,8 +554,6 @@ else:
 # ----------------------------
 # Loop de atualização automática
 # ----------------------------
-# Adiciona um tempo de espera para evitar loops excessivamente rápidos
-# Exibe uma mensagem para o usuário informando sobre a atualização
 st.markdown("---")
 st.write(f"Atualizando automaticamente em 60 segundos...")
 time.sleep(60)

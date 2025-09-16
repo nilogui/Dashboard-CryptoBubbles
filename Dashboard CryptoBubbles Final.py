@@ -1,3 +1,5 @@
+
+import time  # Importar a biblioteca 'time'
 from io import BytesIO
 
 import pandas as pd
@@ -289,7 +291,6 @@ ordered_cols = list(dict.fromkeys(ordered_cols))
 
 df_display_final = df_display[ordered_cols].copy()
 
-# ### MUDANÇA AQUI: Multiplicar 'dominance' por 100 para representação em % ###
 if "dominance" in df_display_final.columns:
     df_display_final["dominance"] = (
         pd.to_numeric(df_display_final["dominance"], errors="coerce", downcast="float")
@@ -512,3 +513,13 @@ if not df_total.empty:
     st.dataframe(styled_stats_df_filtered)
 else:
     st.warning("⚠️ Não há dados disponíveis para calcular estatísticas.")
+
+# ----------------------------
+# Loop de atualização automática
+# ----------------------------
+# Adiciona um tempo de espera para evitar loops excessivamente rápidos
+# Exibe uma mensagem para o usuário informando sobre a atualização
+st.markdown("---")
+st.write(f"Atualizando automaticamente em 60 segundos...")
+time.sleep(60)
+st.rerun()

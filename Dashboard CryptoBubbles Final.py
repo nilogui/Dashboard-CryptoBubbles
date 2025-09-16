@@ -1,12 +1,3 @@
-# https://chatgpt.com/c/68c5c464-aa24-832c-813a-017b6f105565
-# testes_rápidos\Scripts\activate // Em ambiente virtual C:\Users\Usuário\Documents\_Projetos\APIs\
-# streamlit run 'Dashboard CryptoBubbles49 Grok.py'
-# 	You can now view your Streamlit app in your browser.
-# 	Local URL: http://localhost:8501
-# 	Network URL: http://192.168.1.3:8501
-
-# Funcionou tudo dinamicamente
-
 from io import BytesIO
 
 import pandas as pd
@@ -14,6 +5,7 @@ import requests
 import streamlit as st
 
 URL = "https://cryptobubbles.net/backend/data/bubbles1000.usd.json"
+
 
 # ----------------------------
 # Funções auxiliares
@@ -24,14 +16,32 @@ def obter_dados(url=URL):
     response.raise_for_status()
     return response.json()
 
+
 def normalizar_json(dados):
     return pd.json_normalize(dados, sep=".")
+
 
 def converter_para_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         df.to_excel(writer, index=False, sheet_name="Dados")
     return output.getvalue()
+
+
+def color_performance(val):
+    if pd.isna(val) or val is None:
+        return ""
+    try:
+        val_float = float(val)
+        if val_float > 0:
+            return "background-color: #056F05; color: white"
+        elif val_float < 0:
+            return "background-color: #A80606; color: white"
+        else:
+            return ""
+    except (ValueError, TypeError):
+        return ""
+
 
 def human_format(num):
     if num is None or pd.isna(num):
@@ -46,35 +56,11 @@ def human_format(num):
     else:
         return f"{num:,.2f}"
 
-def color_performance(val):
-    if pd.isna(val):
-        return ""
-    val_float = float(val)
-    if val_float > 0:
-        return "background-color: #056F05; color: white"
-    elif val_float < 0:
-        return "background-color: #A80606; color: white"
-    else:
-        return ""
 
 # ----------------------------
 # Configuração Streamlit
 # ----------------------------
 st.set_page_config(page_title="Crypto Dashboard BI", layout="wide")
-# Tema dark agora configurado via .streamlit/config.toml - CSS manual comentado como backup
-# st.markdown(
-#     """
-#     <style>
-#     .main { background-color: #0e1117 !important; color: white !important; }
-#     h1, h2, h3, h4 { color: #f5f5f5 !important; }
-#     .stDataFrame table { background-color: #1e2229 !important; color: white !important; }
-#     .stApp { background-color: #0e1117 !important; }
-#     .stButton>button { background-color: #1e2229 !important; color: white !important; }
-#     </style>
-#     """,
-#     unsafe_allow_html=True
-# )
-
 st.title("💼 Dashboard Executivo - Criptomoedas")
 st.markdown("📊 Fonte: [CryptoBubbles API](https://cryptobubbles.net/)")
 
@@ -83,14 +69,13 @@ st.markdown("📊 Fonte: [CryptoBubbles API](https://cryptobubbles.net/)")
 # ----------------------------
 json_data = obter_dados()
 df = normalizar_json(json_data)
-df_total = df  # Armazena os dados completos antes de aplicar filtros
-if "marketcap" in df.columns:
-    df = df[df["marketcap"] >= 100_000_000]
+df_total = df.copy()
 
 # ----------------------------
 # Sidebar
 # ----------------------------
 st.sidebar.header("⚙️ Filtros e Chaves")
+
 default_keys = [
     "name",
     "symbol",
@@ -107,8 +92,8 @@ default_keys = [
     "performance.month3",
     "performance.year",
 ]
+perf_keys = [k for k in default_keys if "performance" in k]
 
-# Inicialização das session_state
 if "selected_keys" not in st.session_state:
     st.session_state.selected_keys = default_keys.copy()
 if "slider_values" not in st.session_state:
@@ -116,31 +101,51 @@ if "slider_values" not in st.session_state:
 if "multiselect_key_counter" not in st.session_state:
     st.session_state.multiselect_key_counter = 0
 
-# Pré-popula os valores do slider com base nos dados do DataFrame
 if not st.session_state.slider_values:
-    for c in st.session_state.selected_keys:
-        if c in df.columns and pd.api.types.is_numeric_dtype(df[c]):
-            min_val = float(df[c].min())
-            max_val = float(df[c].max())
+    for c in default_keys:
+        if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
+            min_val = float(df_total[c].min())
+            max_val = float(df_total[c].max())
             st.session_state.slider_values[c] = (min_val, max_val)
+    if "marketcap" in st.session_state.slider_values:
+        st.session_state.slider_values["marketcap"] = (
+            100_000_000.0,
+            st.session_state.slider_values["marketcap"][1],
+        )
 
-# Callback para restaurar chaves default
+    if "price" in df_total.columns:
+        max_price = df_total["price"].max() * 1.1
+        st.session_state.slider_values["price"] = (0.0, max_price)
+
+    st.session_state.selected_keys = default_keys.copy()
+
+
 def restore_keys_callback():
     st.session_state.selected_keys = default_keys.copy()
     st.session_state.multiselect_key_counter += 1
     st.session_state.slider_values = {}
-    st.session_state.update_inputs = True  # Sinaliza a atualização
+    st.session_state.update_inputs = True
 
-# Callback para restaurar filtros default
+
 def restore_filters_callback():
-    for c in st.session_state.selected_keys:
-        if c in df.columns and pd.api.types.is_numeric_dtype(df[c]):
-            min_val = float(df[c].min())
-            max_val = float(df[c].max())
+    for c in default_keys:
+        if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
+            min_val = float(df_total[c].min())
+            max_val = float(df_total[c].max())
             st.session_state.slider_values[c] = (min_val, max_val)
-    st.session_state.update_inputs = True  # Sinaliza a atualização
+    if "marketcap" in st.session_state.slider_values:
+        st.session_state.slider_values["marketcap"] = (
+            100_000_000.0,
+            st.session_state.slider_values["marketcap"][1],
+        )
 
-# Botões usam on_click com callbacks
+    if "price" in df_total.columns:
+        max_price = df_total["price"].max() * 1.1
+        st.session_state.slider_values["price"] = (0.0, max_price)
+
+    st.session_state.update_inputs = True
+
+
 st.sidebar.button(
     "🔄 Restaurar Chaves Default",
     on_click=restore_keys_callback,
@@ -152,47 +157,56 @@ st.sidebar.button(
     key="restore_filters_btn",
 )
 
-# Multiselect com key dinâmico
 multiselect_key = f"multiselect_{st.session_state.multiselect_key_counter}"
 chaves_selecionadas = st.sidebar.multiselect(
     "📋 Escolha chaves para consulta",
-    options=[*df.columns],
+    options=[*df_total.columns],
     default=st.session_state.selected_keys,
     key=multiselect_key,
 )
 st.session_state.selected_keys = chaves_selecionadas
 
-# ----------------------------
-# Sliders + input manual para filtros numéricos
-# ----------------------------
 for c in chaves_selecionadas:
-    if pd.api.types.is_numeric_dtype(df[c]):
-        min_val_df = float(df[c].min())
-        max_val_df = float(df[c].max())
+    if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
+        min_val_df = float(df_total[c].min())
+        max_val_df = float(df_total[c].max())
 
-        # Obter os valores atuais do slider/inputs
+        if c == "price":
+            min_val_df = 0.0
+            max_val_df = df_total["price"].max() * 1.1
+
         current_min, current_max = st.session_state.slider_values.get(
             c, (min_val_df, max_val_df)
         )
 
-        # Callback para atualizar os valores de min e max quando os inputs mudam
         def update_slider_from_inputs(key):
             min_input = st.session_state.get(f"{key}_min")
             max_input = st.session_state.get(f"{key}_max")
+            min_val_df_ = (
+                float(df_total[key].min()) if key in df_total.columns else min_val_df
+            )
+            max_val_df_ = (
+                float(df_total[key].max()) if key in df_total.columns else max_val_df
+            )
 
-            # Garante que os valores de min e max são válidos
+            if key == "price":
+                min_val_df_ = 0.0
+                max_val_df_ = df_total["price"].max() * 1.1
+
             if (
                 min_input is not None
                 and max_input is not None
                 and min_input <= max_input
             ):
-                st.session_state.slider_values[key] = (min_input, max_input)
+                st.session_state.slider_values[key] = (
+                    float(min_input),
+                    float(max_input),
+                )
             elif min_input is not None and max_input is None:
-                st.session_state.slider_values[key] = (min_input, max_val_df)
+                st.session_state.slider_values[key] = (float(min_input), max_val_df_)
             elif max_input is not None and min_input is None:
-                st.session_state.slider_values[key] = (min_val_df, max_input)
+                st.session_state.slider_values[key] = (min_val_df_, float(max_input))
 
-        # Sliders e number_inputs para cada coluna
         selected_range = st.sidebar.slider(
             f"{c} ({human_format(min_val_df)} - {human_format(max_val_df)})",
             min_value=min_val_df,
@@ -208,7 +222,7 @@ for c in chaves_selecionadas:
             f"Min {c}",
             min_value=min_val_df,
             max_value=max_val_df,
-            value=selected_range[0],
+            value=max(min_val_df, selected_range[0]),
             key=f"{c}_min",
             on_change=update_slider_from_inputs,
             args=(c,),
@@ -217,67 +231,28 @@ for c in chaves_selecionadas:
             f"Max {c}",
             min_value=min_val_df,
             max_value=max_val_df,
-            value=selected_range[1],
+            value=min(max_val_df, selected_range[1]),
             key=f"{c}_max",
             on_change=update_slider_from_inputs,
             args=(c,),
         )
-
         st.sidebar.markdown("---")
 
-# Filtrar o DataFrame com base nos valores em st.session_state.slider_values
-df_filtrado = df[chaves_selecionadas].copy()
+df_filtrado = df_total.copy()
 for c, (min_val, max_val) in st.session_state.slider_values.items():
-    if c in df_filtrado.columns:
+    if c in df_filtrado.columns and pd.api.types.is_numeric_dtype(df_filtrado[c]):
         df_filtrado = df_filtrado[
-            (df_filtrado[c] >= min_val) & (df_filtrado[c] <= max_val)
+            ((df_filtrado[c] >= min_val) & (df_filtrado[c] <= max_val))
+            | df_filtrado[c].isnull()
         ]
-
-# ----------------------------
-# Performance float
-# ----------------------------
-perf_keys = [
-    "performance.min1",
-    "performance.min5",
-    "performance.min15",
-    "performance.hour",
-    "performance.hour4",
-    "performance.day",
-    "performance.week",
-    "performance.month",
-    "performance.month3",
-    "performance.year",
-]
-for k in perf_keys:
-    if k in df_filtrado.columns:
-        df_filtrado[k + "_float"] = pd.to_numeric(df_filtrado[k], errors="coerce")
 
 # ----------------------------
 # Resultado da Consulta Multi-Nível
 # ----------------------------
 st.markdown("## 🔎 Resultado da Consulta Multi-Nível")
-# Criar df_display diretamente de df_filtrado, preservando todas as linhas
+
 df_display = df_filtrado.copy()
-
-# Garantir que colunas numéricas sejam float para sorting, tratando NaN
-for col in ["marketcap", "volume", "price"]:
-    if col in df_display.columns:
-        df_display[col] = pd.to_numeric(df_display[col], errors="coerce", downcast="float").fillna(0)
-
-# Criar colunas formatadas para exibição legível
-for col in ["marketcap", "volume", "price"]:
-    if col in df_display.columns:
-        df_display[f"{col}_formatted"] = df_display[col].apply(human_format)
-
-# Tratar todas as colunas de performance, preenchendo NaN com "" para exibição
-for k in perf_keys:
-    if k in df_display.columns:
-        df_display[k] = df_display[k].fillna("")
-
-# Renomear colunas performance.* sem alterar o DataFrame subjacente
 renomear = {
-    "performance.min1": "perf.min1",
-    "performance.min5": "perf.min5",
     "performance.min15": "perf.min15",
     "performance.hour": "perf.hour",
     "performance.hour4": "perf.hour4",
@@ -289,50 +264,92 @@ renomear = {
 }
 df_display = df_display.rename(columns=renomear)
 
-# Eliminar colunas _float após uso
-for k in perf_keys:
-    float_col = k + "_float"
-    if float_col in df_display.columns:
-        df_display.drop(columns=[float_col], inplace=True)
+ordered_cols = []
+perf_renomeadas = [renomear.get(k, k) for k in perf_keys]
+fixed_keys = ["name", "symbol", "price", "marketcap", "volume", "dominance"]
+display_keys = {k: k.capitalize() for k in fixed_keys}
+display_keys["dominance"] = "Dominance"
+display_keys["price"] = "Price"
 
-# Configuração de colunas
+for key in fixed_keys:
+    if key in st.session_state.selected_keys and key in df_display.columns:
+        ordered_cols.append(key)
+
+for key in perf_keys:
+    if key in st.session_state.selected_keys:
+        renamed_key = renomear.get(key)
+        if renamed_key and renamed_key in df_display.columns:
+            ordered_cols.append(renamed_key)
+
+for key in st.session_state.selected_keys:
+    if key not in fixed_keys and key not in perf_keys and key in df_display.columns:
+        ordered_cols.append(key)
+
+ordered_cols = list(dict.fromkeys(ordered_cols))
+
+df_display_final = df_display[ordered_cols].copy()
+
+# ### MUDANÇA AQUI: Multiplicar 'dominance' por 100 para representação em % ###
+if "dominance" in df_display_final.columns:
+    df_display_final["dominance"] = (
+        pd.to_numeric(df_display_final["dominance"], errors="coerce", downcast="float")
+        * 100
+    )
+
 column_config = {}
-perf_novas = [new_col for old_col, new_col in renomear.items() if old_col in df_filtrado.columns]
-
-# Para performance
-for col in perf_novas:
-    if col in df_display.columns:
-        column_config[col] = st.column_config.TextColumn(
-            default="",  # Permite exibir "" para NaN
+for col in perf_renomeadas:
+    if col in df_display_final.columns:
+        df_display_final[col] = pd.to_numeric(
+            df_display_final[col], errors="coerce", downcast="float"
         )
-
-# Para marketcap, volume, price
-for col in ["marketcap", "volume", "price"]:
-    if col in df_display.columns:
         column_config[col] = st.column_config.NumberColumn(
-            label=col.replace("_", " ").title(), disabled=True
-        )
-        formatted_col = f"{col}_formatted"
-        column_config[formatted_col] = st.column_config.TextColumn(
-            label=f"{col.replace('_', ' ').title()} (Formatted)", default=""
+            label=col.replace("perf.", "").capitalize(), format="%.2f%%"
         )
 
-display_columns = [
-    col
-    for col in df_display.columns
-    if col.endswith("_formatted")
-    or col in ["price", "marketcap", "volume", "name", "symbol", "dominance"]
-    or col in perf_novas
-]
+if "name" in df_display_final.columns:
+    column_config["name"] = st.column_config.TextColumn(label="Name")
+if "symbol" in df_display_final.columns:
+    column_config["symbol"] = st.column_config.TextColumn(label="Symbol")
+if "dominance" in df_display_final.columns:
+    column_config["dominance"] = st.column_config.NumberColumn(
+        label="Dominance", format="%.2f%%"
+    )
+if "price" in df_display_final.columns:
+    df_display_final["price"] = pd.to_numeric(
+        df_display_final["price"], errors="coerce", downcast="float"
+    )
+    column_config["price"] = st.column_config.NumberColumn(
+        label="Price", format="$ %.2f"
+    )
+if "marketcap" in df_display_final.columns:
+    df_display_final["marketcap"] = pd.to_numeric(
+        df_display_final["marketcap"], errors="coerce", downcast="float"
+    )
+    column_config["marketcap"] = st.column_config.NumberColumn(
+        label="Marketcap", format="compact", help="Formato numérico sem formatação"
+    )
+if "volume" in df_display_final.columns:
+    df_display_final["volume"] = pd.to_numeric(
+        df_display_final["volume"], errors="coerce", downcast="float"
+    )
+    column_config["volume"] = st.column_config.NumberColumn(
+        label="Volume", format="compact", help="Formato numérico sem formatação"
+    )
 
-if not df_display.empty:
-    valid_perf_cols = [col for col in perf_novas if col in display_columns]
+if not df_display_final.empty:
+    valid_perf_cols = [
+        col for col in perf_renomeadas if col in df_display_final.columns
+    ]
+
+    styled_df = df_display_final.style.map(
+        color_performance,
+        subset=valid_perf_cols,
+    )
+
     st.dataframe(
-        df_display[display_columns].style.map(
-            color_performance, subset=valid_perf_cols if valid_perf_cols else None
-        ),
+        styled_df,
         height=500,
-        column_config=column_config if column_config else None,
+        column_config=column_config,
         hide_index=False,
     )
 else:
@@ -353,59 +370,23 @@ colunas_essenciais = ["name", "symbol", "price"]
 colunas_disponiveis = [col for col in colunas_essenciais if col in df_filtrado.columns]
 
 for key, label in intervalos.items():
-    float_key = key + "_float"
-    if float_key in df_filtrado.columns and not df_filtrado.empty:
-        cols_para_selecao = colunas_disponiveis + [float_key]
-        top_altas = df_filtrado.nlargest(3, float_key)[cols_para_selecao]
-        top_baixas = df_filtrado.nsmallest(3, float_key)[cols_para_selecao]
+    if key in df_filtrado.columns and not df_filtrado.empty:
+        df_filtrado[key] = pd.to_numeric(df_filtrado[key], errors="coerce")
+        cols_para_selecao = colunas_disponiveis + [key]
+        top_altas = df_filtrado.nlargest(3, key)[cols_para_selecao]
+        top_baixas = df_filtrado.nsmallest(3, key)[cols_para_selecao]
         colA, colB = st.columns(2)
         with colA:
             st.markdown(f"### 🟢 Maiores Altas - {label}")
-            for idx, (_, r) in enumerate(top_altas.iterrows(), 1):
-                nome_str = (
-                    f"{r.get('name', 'N/A')} " if "name" in colunas_disponiveis else ""
-                )
-                symbol_str = (
-                    f"({r.get('symbol', 'N/A')})"
-                    if "symbol" in colunas_disponiveis
-                    else ""
-                )
-                preco_str = (
-                    f" - ${human_format(r.get('price'))}"
-                    if "price" in colunas_disponiveis
-                    else ""
-                )
-                linha_str = (
-                    f" [# {df_display.index.get_loc(r.name) + 1}]"
-                    if not df_display.empty and r.name in df_display.index
-                    else ""
-                )
+            for _, r in top_altas.iterrows():
                 st.markdown(
-                    f"- {nome_str}{symbol_str}{preco_str}: {r[float_key]:.2f}%{linha_str}"
+                    f"- {r.get('name', 'N/A')} ({r.get('symbol', 'N/A')}) - {r.get(key, 0):.2f}%"
                 )
         with colB:
             st.markdown(f"### 🔴 Maiores Baixas - {label}")
-            for idx, (_, r) in enumerate(top_baixas.iterrows(), 1):
-                nome_str = (
-                    f"{r.get('name', 'N/A')} " if "name" in colunas_disponiveis else ""
-                )
-                symbol_str = (
-                    f"({r.get('symbol', 'N/A')})"
-                    if "symbol" in colunas_disponiveis
-                    else ""
-                )
-                preco_str = (
-                    f" - ${human_format(r.get('price'))}"
-                    if "price" in colunas_disponiveis
-                    else ""
-                )
-                linha_str = (
-                    f" [# {df_display.index.get_loc(r.name) + 1}]"
-                    if not df_display.empty and r.name in df_display.index
-                    else ""
-                )
+            for _, r in top_baixas.iterrows():
                 st.markdown(
-                    f"- {nome_str}{symbol_str}{preco_str}: {r[float_key]:.2f}%{linha_str}"
+                    f"- {r.get('name', 'N/A')} ({r.get('symbol', 'N/A')}) - {r.get(key, 0):.2f}%"
                 )
     else:
         st.warning(f"⚠️ Dados insuficientes para alertas de {label}.")
@@ -414,12 +395,9 @@ for key, label in intervalos.items():
 # Exportação
 # ----------------------------
 st.markdown("## 💾 Exportação de Dados")
-if not df_display.empty:
-    df_export = df_display.copy()
-    for col in ["marketcap", "volume", "price"]:
-        if col in df_export.columns:
-            df_export[col] = df_export[col].apply(human_format)
-    dados_excel = converter_para_excel(df_export[display_columns])
+if not df_display_final.empty:
+    df_export = df_display_final.copy()
+    dados_excel = converter_para_excel(df_export)
     st.download_button("📥 Baixar dados filtrados", dados_excel, "dados_filtrados.xlsx")
 
 # ----------------------------
@@ -434,8 +412,6 @@ if not df.empty:
     max_values = df[perf_keys].max(numeric_only=True).round(2)
 
     performance_labels = [
-        "Min1",
-        "Min5",
         "Min15",
         "Hour",
         "Hour4",
@@ -456,33 +432,20 @@ if not df.empty:
         index=performance_labels,
     )
 
-    st.dataframe(
-        stats_df.style.set_properties(
-            **{
-                "background-color": "#1e2229",
-                "color": "white",
-                "border": "1px solid #333",
-                "text-align": "center",
-                "font-size": "14px",
-            }
-        )
-        .set_table_styles(
-            [
-                {
-                    "selector": "th",
-                    "props": [
-                        ("background-color", "#0e1117"),
-                        ("color", "#f5f5f5"),
-                        ("border", "1px solid #333"),
-                        ("text-align", "center"),
-                        ("font-size", "14px"),
-                    ],
-                }
-            ]
-        )
-        .map(lambda x: "", subset=None),
-        height=385,
+    styled_stats_df = stats_df.style.map(
+        lambda val: (
+            "background-color: #056F05; color: white"
+            if float(val.strip("%")) > 0
+            else (
+                "background-color: #A80606; color: white"
+                if float(val.strip("%")) < 0
+                else ""
+            )
+        ),
+        subset=pd.IndexSlice[:, ["Média (%)", "Mediana (%)"]],
     )
+
+    st.dataframe(styled_stats_df)
 else:
     st.warning("⚠️ Não há dados disponíveis para calcular estatísticas.")
 
@@ -491,7 +454,6 @@ else:
 # ----------------------------
 st.markdown("## 📊 Estatísticas de Desempenho Filtrada")
 if not df_total.empty:
-    # Campo de entrada para número de criptomoedas
     num_cryptos = st.number_input(
         "Número de criptomoedas a considerar (1-1000)",
         min_value=1,
@@ -499,45 +461,30 @@ if not df_total.empty:
         value=100,
         key="num_cryptos_input",
     )
-
-    # Selecionar as top N criptomoedas por marketcap do df_total
     df_top_cryptos = (
-        df_total.nlargest(int(num_cryptos), "marketcap")
+        df_total.nlargest(int(num_cryptos), "marketcap", keep="all")
         if "marketcap" in df_total.columns
         else df_total
     )
-
-    # Usar apenas as colunas de performance disponíveis em df_total
     perf_keys_available = [k for k in perf_keys if k in df_total.columns]
-
-    # Calcular estatísticas com colunas disponíveis
     mean_values = df_top_cryptos[perf_keys_available].mean(numeric_only=True).round(2)
-    median_values = df_top_cryptos[perf_keys_available].median(numeric_only=True).round(2)
+    median_values = (
+        df_top_cryptos[perf_keys_available].median(numeric_only=True).round(2)
+    )
     std_values = df_top_cryptos[perf_keys_available].std(numeric_only=True).round(2)
     min_values = df_top_cryptos[perf_keys_available].min(numeric_only=True).round(2)
     max_values = df_top_cryptos[perf_keys_available].max(numeric_only=True).round(2)
 
-    # Ajustar performance_labels para corresponder às colunas disponíveis
     performance_labels = [
-        label
-        for label, key in zip(
-            [
-                "Min1",
-                "Min5",
-                "Min15",
-                "Hour",
-                "Hour4",
-                "Day",
-                "Week",
-                "Month",
-                "Month3",
-                "Year",
-            ],
-            perf_keys,
-        )
-        if key in perf_keys_available
+        "Min15",
+        "Hour",
+        "Hour4",
+        "Day",
+        "Week",
+        "Month",
+        "Month3",
+        "Year",
     ]
-
     stats_df_filtered = pd.DataFrame(
         {
             "Média (%)": [f"{val:.2f}%" for val in mean_values],
@@ -549,32 +496,19 @@ if not df_total.empty:
         index=performance_labels,
     )
 
-    st.dataframe(
-        stats_df_filtered.style.set_properties(
-            **{
-                "background-color": "#1e2229",
-                "color": "white",
-                "border": "1px solid #333",
-                "text-align": "center",
-                "font-size": "14px",
-            }
-        )
-        .set_table_styles(
-            [
-                {
-                    "selector": "th",
-                    "props": [
-                        ("background-color", "#0e1117"),
-                        ("color", "#f5f5f5"),
-                        ("border", "1px solid #333"),
-                        ("text-align", "center"),
-                        ("font-size", "14px"),
-                    ],
-                }
-            ]
-        )
-        .map(lambda x: "", subset=None),
-        height=385,
+    styled_stats_df_filtered = stats_df_filtered.style.map(
+        lambda val: (
+            "background-color: #056F05; color: white"
+            if float(val.strip("%")) > 0
+            else (
+                "background-color: #A80606; color: white"
+                if float(val.strip("%")) < 0
+                else ""
+            )
+        ),
+        subset=pd.IndexSlice[:, ["Média (%)", "Mediana (%)"]],
     )
+
+    st.dataframe(styled_stats_df_filtered)
 else:
     st.warning("⚠️ Não há dados disponíveis para calcular estatísticas.")

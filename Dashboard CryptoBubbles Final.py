@@ -37,9 +37,9 @@ def color_performance(val):
     try:
         val_float = float(val)
         if val_float > 0:
-            return "background-color: #056F05; color: white"
+            return "background-color: #228822; color: white"
         elif val_float < 0:
-            return "background-color: #A80606; color: white"
+            return "background-color: #AA3333; color: white"
         else:
             return ""
     except (ValueError, TypeError):
@@ -104,33 +104,41 @@ if "slider_values" not in st.session_state:
 if "multiselect_key_counter" not in st.session_state:
     st.session_state.multiselect_key_counter = 0
 
-if not st.session_state.slider_values:
-    for c in default_keys:
-        if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
-            min_val = float(df_total[c].min())
-            max_val = float(df_total[c].max())
-            if c == "marketcap":
-                min_val = 100_000_000.0
-                max_val = max_val * 1.1
-            elif c != "price" and c != "dominance":
-                min_val = min_val * 0.9 if min_val > 0 else min_val * 1.1
-                max_val = max_val * 1.1 if max_val > 0 else max_val * 0.9
-            elif c == "dominance":
-                min_val = 0.0
-                max_val = max_val * 1.1
-            st.session_state.slider_values[c] = (min_val, max_val)
-    if "price" in df_total.columns:
-        max_price = df_total["price"].max() * 1.1
-        st.session_state.slider_values["price"] = (0.0, max_price)
+marketcap_options = {
+    "0": 0.0,
+    "100M": 100_000_000.0,
+    "500M": 500_000_000.0,
+    "1B": 1_000_000_000.0,
+    "5B": 5_000_000_000.0,
+    "10B": 10_000_000_000.0,
+}
 
-    st.session_state.selected_keys = default_keys.copy()
+quick_select_options = {
+    "Todas": default_keys,
+    "Performances": ["name", "price"] + [k for k in default_keys if "performance" in k],
+    "Volume/Dominance": [
+        "name",
+        "price",
+        "volume",
+        "dominance",
+        "performance.day",
+        "performance.week",
+        "performance.month",
+        "performance.month3",
+        "performance.year",
+    ],
+}
+
+
+def update_selected_keys():
+    selected_option = st.session_state.quick_select_option
+    st.session_state.selected_keys = quick_select_options[selected_option]
+    st.session_state.multiselect_key_counter += 1
 
 
 def restore_keys_callback():
     st.session_state.selected_keys = default_keys.copy()
     st.session_state.multiselect_key_counter += 1
-    st.session_state.slider_values = {}
-    st.session_state.update_inputs = True
 
 
 def restore_filters_callback():
@@ -165,6 +173,14 @@ st.sidebar.button(
     on_click=restore_filters_callback,
     key="restore_filters_btn",
 )
+st.sidebar.markdown("---")
+
+st.sidebar.selectbox(
+    "Seleção Rápida de Colunas",
+    options=list(quick_select_options.keys()),
+    key="quick_select_option",
+    on_change=update_selected_keys,
+)
 
 multiselect_key = f"multiselect_{st.session_state.multiselect_key_counter}"
 chaves_selecionadas = st.sidebar.multiselect(
@@ -175,27 +191,67 @@ chaves_selecionadas = st.sidebar.multiselect(
 )
 st.session_state.selected_keys = chaves_selecionadas
 
+st.sidebar.markdown("---")
+if "marketcap" in st.session_state.selected_keys:
+    marketcap_quick_select = st.sidebar.selectbox(
+        "Marketcap Mínimo (Seleção Rápida)",
+        options=list(marketcap_options.keys()),
+        index=list(marketcap_options.keys()).index("100M"),
+    )
+    selected_min_marketcap = marketcap_options[marketcap_quick_select]
+    if "marketcap" not in st.session_state.slider_values:
+        max_val_marketcap = float(df_total["marketcap"].max()) * 1.1
+        st.session_state.slider_values["marketcap"] = (
+            selected_min_marketcap,
+            max_val_marketcap,
+        )
+    else:
+        current_max = st.session_state.slider_values["marketcap"][1]
+        st.session_state.slider_values["marketcap"] = (
+            selected_min_marketcap,
+            current_max,
+        )
+
 for c in chaves_selecionadas:
     if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
         min_val_df = float(df_total[c].min())
         max_val_df = float(df_total[c].max())
 
         if c == "marketcap":
-            min_val_df = 100_000_000.0
-            max_val_df = max_val_df * 1.1
+            min_val_df = float(df_total[c].min())
+            max_val_df = float(df_total[c].max()) * 1.1
+            current_min_val = float(
+                st.session_state.slider_values.get(
+                    c, (selected_min_marketcap, max_val_df)
+                )[0]
+            )
+            current_max_val = float(
+                st.session_state.slider_values.get(
+                    c, (selected_min_marketcap, max_val_df)
+                )[1]
+            )
         elif c != "price" and c != "dominance":
             min_val_df = min_val_df * 0.9 if min_val_df > 0 else min_val_df * 1.1
             max_val_df = max_val_df * 1.1 if max_val_df > 0 else max_val_df * 0.9
+            current_min_val, current_max_val = st.session_state.slider_values.get(
+                c, (min_val_df, max_val_df)
+            )
         elif c == "price":
             min_val_df = 0.0
             max_val_df = df_total["price"].max() * 1.1
+            current_min_val, current_max_val = st.session_state.slider_values.get(
+                c, (min_val_df, max_val_df)
+            )
         elif c == "dominance":
             min_val_df = 0.0
             max_val_df = max_val_df * 1.1
-
-        current_min, current_max = st.session_state.slider_values.get(
-            c, (min_val_df, max_val_df)
-        )
+            current_min_val, current_max_val = st.session_state.slider_values.get(
+                c, (min_val_df, max_val_df)
+            )
+        else:
+            current_min_val, current_max_val = st.session_state.slider_values.get(
+                c, (min_val_df, max_val_df)
+            )
 
         def update_slider_from_inputs(key):
             min_input = st.session_state.get(f"{key}_min")
@@ -242,7 +298,7 @@ for c in chaves_selecionadas:
             f"{c} ({human_format(min_val_df)} - {human_format(max_val_df)})",
             min_value=min_val_df,
             max_value=max_val_df,
-            value=(current_min, current_max),
+            value=(current_min_val, current_max_val),
             key=f"{c}_slider",
             on_change=lambda c=c: st.session_state.slider_values.update(
                 {c: st.session_state[f"{c}_slider"]}
@@ -337,7 +393,7 @@ for col in perf_renomeadas:
         )
 
 if "name" in df_display_final.columns:
-    column_config["name"] = st.column_config.TextColumn(label="Name")
+    column_config["name"] = st.column_config.TextColumn(label="Name", pinned=True)
 if "symbol" in df_display_final.columns:
     column_config["symbol"] = st.column_config.TextColumn(label="Symbol")
 if "dominance" in df_display_final.columns:
@@ -410,13 +466,13 @@ for key, label in intervalos.items():
             st.markdown(f"### 🟢 Maiores Altas - {label}")
             for _, r in top_altas.iterrows():
                 st.markdown(
-                    f"- {r.get('name', 'N/A')} ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
+                    f"- {r.get('name', 'N/A')} [{r.get('symbol', 'N/A')}] ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
                 )
         with colB:
             st.markdown(f"### 🔴 Maiores Baixas - {label}")
             for _, r in top_baixas.iterrows():
                 st.markdown(
-                    f"- {r.get('name', 'N/A')} ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
+                    f"- {r.get('name', 'N/A')} [{r.get('symbol', 'N/A')}] ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
                 )
     else:
         st.warning(f"⚠️ Dados insuficientes para alertas de {label}.")
@@ -471,10 +527,10 @@ if not df.empty:
 
     styled_stats_df = stats_df.style.map(
         lambda val: (
-            "background-color: #056F05; color: white"
+            "background-color: #228822; color: white"
             if float(val.strip("%")) > 0
             else (
-                "background-color: #A80606; color: white"
+                "background-color: #AA3333; color: white"
                 if float(val.strip("%")) < 0
                 else ""
             )
@@ -536,10 +592,10 @@ if not df_total.empty:
 
     styled_stats_df_filtered = stats_df_filtered.style.map(
         lambda val: (
-            "background-color: #056F05; color: white"
+            "background-color: #228822; color: white"
             if float(val.strip("%")) > 0
             else (
-                "background-color: #A80606; color: white"
+                "background-color: #AA3333; color: white"
                 if float(val.strip("%")) < 0
                 else ""
             )

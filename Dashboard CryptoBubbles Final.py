@@ -7,18 +7,21 @@ import streamlit as st
 
 URL = "https://cryptobubbles.net/backend/data/bubbles1000.usd.json"
 
-
 # ----------------------------
 # Funções auxiliares
 # ----------------------------
+
+
 @st.cache_data(ttl=60)
 def obter_dados(url=URL):
+    """Obtém os dados do Cryptobubbles."""
     response = requests.get(url)
     response.raise_for_status()
     return response.json()
 
 
 def normalizar_json(dados):
+    """Normaliza o JSON e adiciona a coluna de rank."""
     df = pd.json_normalize(dados, sep=".")
     df["rank"] = df["marketcap"].rank(method="min", ascending=False).astype(int)
     return df
@@ -55,7 +58,7 @@ def human_format(num):
     elif abs(num) >= 1_000_000:
         return f"{num/1_000_000:.2f}M"
     elif abs(num) >= 1_000:
-        return f"{num/1_000:.2f}K"
+        return f"{num:,.2f}K"
     else:
         return f"{num:,.2f}"
 
@@ -68,16 +71,21 @@ st.title("💼 Dashboard Executivo - Criptomoedas")
 st.markdown("📊 Fonte: [CryptoBubbles API](https://cryptobubbles.net/)")
 
 # ----------------------------
-# Carregar dados
+# Carregar dados e gerar links
 # ----------------------------
 json_data = obter_dados()
 df = normalizar_json(json_data)
 df_total = df.copy()
 
+# Apenas criar a coluna de links usando o 'slug'
+df_total["links"] = df_total["slug"].apply(
+    lambda x: f"https://coinmarketcap.com/currencies/{x}" if x else ""
+)
+
 # ----------------------------
 # Sidebar
 # ----------------------------
-st.sidebar.header("⚙️ Filtros e Chaves")
+st.sidebar.header("⚙️ Filtros e Colunas")
 
 default_keys = [
     "name",
@@ -94,6 +102,7 @@ default_keys = [
     "performance.month",
     "performance.month3",
     "performance.year",
+    "links",
 ]
 perf_keys = [k for k in default_keys if "performance" in k]
 
@@ -115,7 +124,9 @@ marketcap_options = {
 
 quick_select_options = {
     "Todas": default_keys,
-    "Performances": ["name", "price"] + [k for k in default_keys if "performance" in k],
+    "Performances": ["name", "price"]
+    + [k for k in default_keys if "performance" in k]
+    + ["links"],
     "Volume/Dominance": [
         "name",
         "price",
@@ -126,6 +137,7 @@ quick_select_options = {
         "performance.month",
         "performance.month3",
         "performance.year",
+        "links",
     ],
 }
 
@@ -164,7 +176,7 @@ def restore_filters_callback():
 
 
 st.sidebar.button(
-    "🔄 Restaurar Chaves Default",
+    "🔄 Restaurar Colunas Default",
     on_click=restore_keys_callback,
     key="restore_keys_btn",
 )
@@ -184,7 +196,7 @@ st.sidebar.selectbox(
 
 multiselect_key = f"multiselect_{st.session_state.multiselect_key_counter}"
 chaves_selecionadas = st.sidebar.multiselect(
-    "📋 Escolha chaves para consulta",
+    "📋 Escolha colunas para consulta",
     options=[*df_total.columns],
     default=st.session_state.selected_keys,
     key=multiselect_key,
@@ -368,8 +380,16 @@ for key in perf_keys:
         if renamed_key and renamed_key in df_display.columns:
             ordered_cols.append(renamed_key)
 
+if "links" in st.session_state.selected_keys and "links" in df_display.columns:
+    ordered_cols.append("links")
+
 for key in st.session_state.selected_keys:
-    if key not in fixed_keys and key not in perf_keys and key in df_display.columns:
+    if (
+        key not in fixed_keys
+        and key not in perf_keys
+        and key not in ["links"]
+        and key in df_display.columns
+    ):
         ordered_cols.append(key)
 
 ordered_cols = list(dict.fromkeys(ordered_cols))
@@ -393,7 +413,9 @@ for col in perf_renomeadas:
         )
 
 if "name" in df_display_final.columns:
-    column_config["name"] = st.column_config.TextColumn(label="Name", pinned=True)
+    column_config["name"] = st.column_config.TextColumn(
+        label="Name", pinned=True, width=120
+    )
 if "symbol" in df_display_final.columns:
     column_config["symbol"] = st.column_config.TextColumn(label="Symbol")
 if "dominance" in df_display_final.columns:
@@ -420,6 +442,10 @@ if "volume" in df_display_final.columns:
     )
     column_config["volume"] = st.column_config.NumberColumn(
         label="Volume", format="compact", help="Formato numérico sem formatação"
+    )
+if "links" in df_display_final.columns:
+    column_config["links"] = st.column_config.LinkColumn(
+        "CoinMarketCap", help="Link para o CoinMarketCap", display_text="Ver"
     )
 
 if not df_display_final.empty:
@@ -452,7 +478,8 @@ intervalos = {
     "performance.month": "Mês",
     "performance.month3": "3 Meses",
 }
-colunas_essenciais = ["name", "symbol", "price", "rank"]
+# Inclui a coluna 'links' que já foi criada para uso aqui
+colunas_essenciais = ["name", "slug", "symbol", "price", "rank", "links"]
 colunas_disponiveis = [col for col in colunas_essenciais if col in df_filtrado.columns]
 
 for key, label in intervalos.items():
@@ -465,14 +492,22 @@ for key, label in intervalos.items():
         with colA:
             st.markdown(f"### 🟢 Maiores Altas - {label}")
             for _, r in top_altas.iterrows():
+                link_text = f"[{r.get('name', 'N/A')}]"
+                if r.get("links"):
+                    link_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
+
                 st.markdown(
-                    f"- {r.get('name', 'N/A')} [{r.get('symbol', 'N/A')}] ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
+                    f"- {link_text} [{r.get('symbol', 'N/A')}] ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
                 )
         with colB:
             st.markdown(f"### 🔴 Maiores Baixas - {label}")
             for _, r in top_baixas.iterrows():
+                link_text = f"[{r.get('name', 'N/A')}]"
+                if r.get("links"):
+                    link_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
+
                 st.markdown(
-                    f"- {r.get('name', 'N/A')} [{r.get('symbol', 'N/A')}] ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
+                    f"- {link_text} [{r.get('symbol', 'N/A')}] ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
                 )
     else:
         st.warning(f"⚠️ Dados insuficientes para alertas de {label}.")

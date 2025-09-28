@@ -1,9 +1,8 @@
-import time
 from io import BytesIO
-
 import pandas as pd
 import requests
 import streamlit as st
+import time
 
 URL = "https://cryptobubbles.net/backend/data/bubbles1000.usd.json"
 
@@ -58,7 +57,7 @@ def human_format(num):
     elif abs(num) >= 1_000_000:
         return f"{num/1_000_000:.2f}M"
     elif abs(num) >= 1_000:
-        return f"{num:,.2f}K"
+        return f"{num/1_000:.2f}K"
     else:
         return f"{num:,.2f}"
 
@@ -77,9 +76,14 @@ json_data = obter_dados()
 df = normalizar_json(json_data)
 df_total = df.copy()
 
-# Apenas criar a coluna de links usando o 'slug'
+# 1. Coluna do CoinMarketCap
 df_total["links"] = df_total["slug"].apply(
     lambda x: f"https://coinmarketcap.com/currencies/{x}" if x else ""
+)
+
+# 2. Coluna do CoinGecko (usando cg_id)
+df_total["coingecko_links"] = df_total["cg_id"].apply(
+    lambda x: f"https://www.coingecko.com/en/coins/{x}" if x else ""
 )
 
 # ----------------------------
@@ -103,6 +107,7 @@ default_keys = [
     "performance.month3",
     "performance.year",
     "links",
+    "coingecko_links",
 ]
 perf_keys = [k for k in default_keys if "performance" in k]
 
@@ -126,7 +131,7 @@ quick_select_options = {
     "Todas": default_keys,
     "Performances": ["name", "price"]
     + [k for k in default_keys if "performance" in k]
-    + ["links"],
+    + ["links", "coingecko_links"],
     "Volume/Dominance": [
         "name",
         "price",
@@ -138,6 +143,7 @@ quick_select_options = {
         "performance.month3",
         "performance.year",
         "links",
+        "coingecko_links",
     ],
 }
 
@@ -360,6 +366,7 @@ renomear = {
     "performance.month": "perf.month",
     "performance.month3": "perf.month3",
     "performance.year": "perf.year",
+    "coingecko_links": "CoinGecko",  # Renomeia a coluna para exibição
 }
 df_display = df_display.rename(columns=renomear)
 
@@ -380,21 +387,30 @@ for key in perf_keys:
         if renamed_key and renamed_key in df_display.columns:
             ordered_cols.append(renamed_key)
 
+# Lógica para posicionar os links ao final das colunas fixas e de performance
 if "links" in st.session_state.selected_keys and "links" in df_display.columns:
     ordered_cols.append("links")
+if (
+    "coingecko_links" in st.session_state.selected_keys
+    and "CoinGecko" in df_display.columns
+):
+    ordered_cols.append("CoinGecko")
 
 for key in st.session_state.selected_keys:
+    # Adiciona colunas não classificadas
     if (
         key not in fixed_keys
         and key not in perf_keys
-        and key not in ["links"]
+        and key not in ["links", "coingecko_links"]
         and key in df_display.columns
     ):
         ordered_cols.append(key)
 
 ordered_cols = list(dict.fromkeys(ordered_cols))
 
-df_display_final = df_display[ordered_cols].copy()
+df_display_final = df_display[
+    [col for col in ordered_cols if col in df_display.columns]
+].copy()
 
 if "dominance" in df_display_final.columns:
     df_display_final["dominance"] = (
@@ -447,6 +463,11 @@ if "links" in df_display_final.columns:
     column_config["links"] = st.column_config.LinkColumn(
         "CoinMarketCap", help="Link para o CoinMarketCap", display_text="Ver"
     )
+# Configuração do link CoinGecko
+if "CoinGecko" in df_display_final.columns:
+    column_config["CoinGecko"] = st.column_config.LinkColumn(
+        "CoinGecko", help="Link para o CoinGecko", display_text="Ver"
+    )
 
 if not df_display_final.empty:
     valid_perf_cols = [
@@ -478,39 +499,112 @@ intervalos = {
     "performance.month": "Mês",
     "performance.month3": "3 Meses",
 }
-# Inclui a coluna 'links' que já foi criada para uso aqui
-colunas_essenciais = ["name", "slug", "symbol", "price", "rank", "links"]
+
+# Mapeamento da chave de performance para a chave de variação de rank
+rank_map = {
+    "performance.hour": "rankDiffs.hour",
+    "performance.day": "rankDiffs.day",
+    "performance.week": "rankDiffs.week",
+    "performance.month": "rankDiffs.month",
+    "performance.month3": "rankDiffs.month3",
+}
+
+# Inclui as colunas 'slug', 'links', 'coingecko_links', 'rank' e TODAS as colunas rankDiffs necessárias
+colunas_essenciais = [
+    "name",
+    "slug",
+    "symbol",
+    "price",
+    "rank",
+    "links",
+    "coingecko_links",
+] + list(rank_map.values())
 colunas_disponiveis = [col for col in colunas_essenciais if col in df_filtrado.columns]
 
 for key, label in intervalos.items():
-    if key in df_filtrado.columns and not df_filtrado.empty:
+    rank_key = rank_map.get(key)
+
+    # Verifica se a chave de performance e a chave de rank estão disponíveis no DataFrame
+    if (
+        key in df_filtrado.columns
+        and rank_key in df_filtrado.columns
+        and not df_filtrado.empty
+    ):
         df_filtrado[key] = pd.to_numeric(df_filtrado[key], errors="coerce")
-        cols_para_selecao = colunas_disponiveis + [key]
+
+        # Cria uma lista de colunas para seleção para garantir que o rank_key e as colunas de link estejam incluídos
+        cols_para_selecao = [c for c in colunas_disponiveis if c != rank_key] + [
+            rank_key,
+            key,
+        ]
+
         top_altas = df_filtrado.nlargest(3, key)[cols_para_selecao]
         top_baixas = df_filtrado.nsmallest(3, key)[cols_para_selecao]
         colA, colB = st.columns(2)
         with colA:
             st.markdown(f"### 🟢 Maiores Altas - {label}")
             for _, r in top_altas.iterrows():
-                link_text = f"[{r.get('name', 'N/A')}]"
+                # Formata o nome como link CoinMarketCap (opcional, como já estava)
+                link_name_text = r.get("name", "N/A")
                 if r.get("links"):
-                    link_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
+                    link_name_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
 
+                # --- NOVO: Formata o SÍMBOLO como link CoinGecko ---
+                symbol_text = r.get("symbol", "N/A")
+                if r.get("coingecko_links"):
+                    # Aplica o link CoinGecko ao símbolo
+                    symbol_display = f"**[{symbol_text}]({r.get('coingecko_links')})**"
+                else:
+                    symbol_display = f"**[{symbol_text}]**"
+
+                # Obtém o rank e a variação
+                current_rank = r.get("rank", "N/A")
+                rank_change = r.get(rank_key)
+
+                # Formata a variação. Se for NaN ou None, usa "N/A"
+                rank_change_str = (
+                    str(int(rank_change)) if not pd.isna(rank_change) else "N/A"
+                )
+                rank_info = f"**[{current_rank} / {rank_change_str}]**"
+
+                # Formato final: [name (link)] [symbol (coingecko link)] [rank / rank_change] (price | variation%)
                 st.markdown(
-                    f"- {link_text} [{r.get('symbol', 'N/A')}] ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
+                    f"- {link_name_text} {symbol_display} {rank_info} (${r.get('price', 0):.8f} | {r.get(key, 0):.2f}%)"
                 )
         with colB:
             st.markdown(f"### 🔴 Maiores Baixas - {label}")
             for _, r in top_baixas.iterrows():
-                link_text = f"[{r.get('name', 'N/A')}]"
+                # Formata o nome como link CoinMarketCap (opcional, como já estava)
+                link_name_text = r.get("name", "N/A")
                 if r.get("links"):
-                    link_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
+                    link_name_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
 
+                # --- NOVO: Formata o SÍMBOLO como link CoinGecko ---
+                symbol_text = r.get("symbol", "N/A")
+                if r.get("coingecko_links"):
+                    # Aplica o link CoinGecko ao símbolo
+                    symbol_display = f"**[{symbol_text}]({r.get('coingecko_links')})**"
+                else:
+                    symbol_display = f"**[{symbol_text}]**"
+
+                # Obtém o rank e a variação
+                current_rank = r.get("rank", "N/A")
+                rank_change = r.get(rank_key)
+
+                # Formata a variação. Se for NaN ou None, usa "N/A"
+                rank_change_str = (
+                    str(int(rank_change)) if not pd.isna(rank_change) else "N/A"
+                )
+                rank_info = f"**[{current_rank} / {rank_change_str}]**"
+
+                # Formato final: [name (link)] [symbol (coingecko link)] [rank / rank_change] (price | variation%)
                 st.markdown(
-                    f"- {link_text} [{r.get('symbol', 'N/A')}] ($ {r.get('price', 0):.8f}) [{r.get('rank', 'N/A')}] {r.get(key, 0):.2f}%"
+                    f"- {link_name_text} {symbol_display} {rank_info} (${r.get('price', 0):.8f} | {r.get(key, 0):.2f}%)"
                 )
     else:
-        st.warning(f"⚠️ Dados insuficientes para alertas de {label}.")
+        st.warning(
+            f"⚠️ Dados insuficientes para alertas de {label} (faltando {key} ou {rank_key})."
+        )
 
 # ----------------------------
 # Exportação

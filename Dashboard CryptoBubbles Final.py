@@ -424,9 +424,25 @@ for col in perf_renomeadas:
         df_display_final[col] = pd.to_numeric(
             df_display_final[col], errors="coerce", downcast="float"
         )
-        column_config[col] = st.column_config.NumberColumn(
-            label=col.replace("perf.", "").capitalize(), format="%.2f%%"
-        )
+
+        # --- Configurações de Largura Ajustadas (Year, Month3, Month) ---
+        if col == "perf.year":
+            column_config[col] = st.column_config.NumberColumn(
+                label="Year", format="%.2f%%", width=78
+            )
+        elif col == "perf.month3":
+            column_config[col] = st.column_config.NumberColumn(
+                label="Month3", format="%.2f%%", width=78
+            )
+        elif col == "perf.month":
+            column_config[col] = st.column_config.NumberColumn(
+                label="Month", format="%.2f%%", width=70  # Largura alterada para 70
+            )
+        # --- Configurações Padrão para as Outras Colunas de Performance ---
+        else:
+            column_config[col] = st.column_config.NumberColumn(
+                label=col.replace("perf.", "").capitalize(), format="%.2f%%"
+            )
 
 if "name" in df_display_final.columns:
     column_config["name"] = st.column_config.TextColumn(

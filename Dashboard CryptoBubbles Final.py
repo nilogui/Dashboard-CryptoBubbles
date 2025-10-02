@@ -86,6 +86,12 @@ df_total["coingecko_links"] = df_total["cg_id"].apply(
     lambda x: f"https://www.coingecko.com/en/coins/{x}" if x else ""
 )
 
+# 3. Coluna do TradingView
+df_total["tradingview_links"] = df_total["symbol"].apply(
+    lambda x: f"https://www.tradingview.com/chart/?symbol={x}USDT" if x else ""
+)
+
+
 # ----------------------------
 # Sidebar
 # ----------------------------
@@ -108,6 +114,7 @@ default_keys = [
     "performance.year",
     "links",
     "coingecko_links",
+    "tradingview_links",
 ]
 perf_keys = [k for k in default_keys if "performance" in k]
 
@@ -131,7 +138,7 @@ quick_select_options = {
     "Todas": default_keys,
     "Performances": ["name", "price"]
     + [k for k in default_keys if "performance" in k]
-    + ["links", "coingecko_links"],
+    + ["links", "coingecko_links", "tradingview_links"],
     "Volume/Dominance": [
         "name",
         "price",
@@ -144,6 +151,7 @@ quick_select_options = {
         "performance.year",
         "links",
         "coingecko_links",
+        "tradingview_links",
     ],
 }
 
@@ -367,6 +375,7 @@ renomear = {
     "performance.month3": "perf.month3",
     "performance.year": "perf.year",
     "coingecko_links": "CoinGecko",  # Renomeia a coluna para exibição
+    "tradingview_links": "TradingView",  # Renomeia a coluna para exibição
 }
 df_display = df_display.rename(columns=renomear)
 
@@ -395,13 +404,18 @@ if (
     and "CoinGecko" in df_display.columns
 ):
     ordered_cols.append("CoinGecko")
+if (
+    "tradingview_links" in st.session_state.selected_keys
+    and "TradingView" in df_display.columns
+):
+    ordered_cols.append("TradingView")
 
 for key in st.session_state.selected_keys:
     # Adiciona colunas não classificadas
     if (
         key not in fixed_keys
         and key not in perf_keys
-        and key not in ["links", "coingecko_links"]
+        and key not in ["links", "coingecko_links", "tradingview_links"]
         and key in df_display.columns
     ):
         ordered_cols.append(key)
@@ -436,7 +450,7 @@ for col in perf_renomeadas:
             )
         elif col == "perf.month":
             column_config[col] = st.column_config.NumberColumn(
-                label="Month", format="%.2f%%", width=70  # Largura alterada para 70
+                label="Month", format="%.2f%%", width=70
             )
         # --- Configurações Padrão para as Outras Colunas de Performance ---
         else:
@@ -484,6 +498,11 @@ if "CoinGecko" in df_display_final.columns:
     column_config["CoinGecko"] = st.column_config.LinkColumn(
         "CoinGecko", help="Link para o CoinGecko", display_text="Ver"
     )
+# Configuração do link TradingView
+if "TradingView" in df_display_final.columns:
+    column_config["TradingView"] = st.column_config.LinkColumn(
+        "TradingView", help="Link para o TradingView", display_text="Gráfico"
+    )
 
 if not df_display_final.empty:
     valid_perf_cols = [
@@ -525,7 +544,7 @@ rank_map = {
     "performance.month3": "rankDiffs.month3",
 }
 
-# Inclui as colunas 'slug', 'links', 'coingecko_links', 'rank' e TODAS as colunas rankDiffs necessárias
+# Inclui as colunas 'slug', 'links', 'coingecko_links', 'rank', 'tradingview_links' e TODAS as colunas rankDiffs necessárias
 colunas_essenciais = [
     "name",
     "slug",
@@ -534,6 +553,7 @@ colunas_essenciais = [
     "rank",
     "links",
     "coingecko_links",
+    "tradingview_links",
 ] + list(rank_map.values())
 colunas_disponiveis = [col for col in colunas_essenciais if col in df_filtrado.columns]
 
@@ -560,62 +580,80 @@ for key, label in intervalos.items():
         with colA:
             st.markdown(f"### 🟢 Maiores Altas - {label}")
             for _, r in top_altas.iterrows():
-                # Formata o nome como link CoinMarketCap (opcional, como já estava)
+                # Formata o nome como link CoinMarketCap
                 link_name_text = r.get("name", "N/A")
                 if r.get("links"):
                     link_name_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
 
-                # --- NOVO: Formata o SÍMBOLO como link CoinGecko ---
-                symbol_text = r.get("symbol", "N/A")
-                if r.get("coingecko_links"):
-                    # Aplica o link CoinGecko ao símbolo
-                    symbol_display = f"**[{symbol_text}]({r.get('coingecko_links')})**"
-                else:
-                    symbol_display = f"**[{symbol_text}]**"
+                # Formata o SÍMBOLO (sem link)
+                symbol_display = f"**[{r.get('symbol', 'N/A')}]**"
 
                 # Obtém o rank e a variação
                 current_rank = r.get("rank", "N/A")
                 rank_change = r.get(rank_key)
-
-                # Formata a variação. Se for NaN ou None, usa "N/A"
                 rank_change_str = (
                     str(int(rank_change)) if not pd.isna(rank_change) else "N/A"
                 )
-                rank_info = f"**[{current_rank} / {rank_change_str}]**"
 
-                # Formato final: [name (link)] [symbol (coingecko link)] [rank / rank_change] (price | variation%)
+                # Formata o rank com o link CoinGecko
+                rank_info_text = f"[{current_rank} / {rank_change_str}]"
+                if r.get("coingecko_links"):
+                    rank_info = f"**[{rank_info_text}]({r.get('coingecko_links')})**"
+                else:
+                    rank_info = f"**{rank_info_text}**"
+
+                # Formata o preço (agora sem link)
+                price_display = f"${r.get('price', 0):.8f}"
+
+                # NOVO: Formata a variação (%) com link TradingView
+                perf_text = f"{r.get(key, 0):.2f}%"
+                if r.get("tradingview_links"):
+                    perf_display = f"**[{perf_text}]({r.get('tradingview_links')})**"  # Aplica o link à variação
+                else:
+                    perf_display = f"**{perf_text}**"
+
+                # Formato final: [name (CMC link)] [symbol] [rank / rank_change (CoinGecko link)] (price | variation% (TradingView link))
                 st.markdown(
-                    f"- {link_name_text} {symbol_display} {rank_info} (${r.get('price', 0):.8f} | {r.get(key, 0):.2f}%)"
+                    f"- {link_name_text} {symbol_display} {rank_info} ({price_display} | {perf_display})"
                 )
         with colB:
             st.markdown(f"### 🔴 Maiores Baixas - {label}")
             for _, r in top_baixas.iterrows():
-                # Formata o nome como link CoinMarketCap (opcional, como já estava)
+                # Formata o nome como link CoinMarketCap
                 link_name_text = r.get("name", "N/A")
                 if r.get("links"):
                     link_name_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
 
-                # --- NOVO: Formata o SÍMBOLO como link CoinGecko ---
-                symbol_text = r.get("symbol", "N/A")
-                if r.get("coingecko_links"):
-                    # Aplica o link CoinGecko ao símbolo
-                    symbol_display = f"**[{symbol_text}]({r.get('coingecko_links')})**"
-                else:
-                    symbol_display = f"**[{symbol_text}]**"
+                # Formata o SÍMBOLO (sem link)
+                symbol_display = f"**[{r.get('symbol', 'N/A')}]**"
 
                 # Obtém o rank e a variação
                 current_rank = r.get("rank", "N/A")
                 rank_change = r.get(rank_key)
-
-                # Formata a variação. Se for NaN ou None, usa "N/A"
                 rank_change_str = (
                     str(int(rank_change)) if not pd.isna(rank_change) else "N/A"
                 )
-                rank_info = f"**[{current_rank} / {rank_change_str}]**"
 
-                # Formato final: [name (link)] [symbol (coingecko link)] [rank / rank_change] (price | variation%)
+                # Formata o rank com o link CoinGecko
+                rank_info_text = f"[{current_rank} / {rank_change_str}]"
+                if r.get("coingecko_links"):
+                    rank_info = f"**[{rank_info_text}]({r.get('coingecko_links')})**"
+                else:
+                    rank_info = f"**{rank_info_text}**"
+
+                # Formata o preço (agora sem link)
+                price_display = f"${r.get('price', 0):.8f}"
+
+                # NOVO: Formata a variação (%) com link TradingView
+                perf_text = f"{r.get(key, 0):.2f}%"
+                if r.get("tradingview_links"):
+                    perf_display = f"**[{perf_text}]({r.get('tradingview_links')})**"  # Aplica o link à variação
+                else:
+                    perf_display = f"**{perf_text}**"
+
+                # Formato final: [name (CMC link)] [symbol] [rank / rank_change (CoinGecko link)] (price | variation% (TradingView link))
                 st.markdown(
-                    f"- {link_name_text} {symbol_display} {rank_info} (${r.get('price', 0):.8f} | {r.get(key, 0):.2f}%)"
+                    f"- {link_name_text} {symbol_display} {rank_info} ({price_display} | {perf_display})"
                 )
     else:
         st.warning(

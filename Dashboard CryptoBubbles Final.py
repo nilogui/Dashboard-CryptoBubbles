@@ -86,16 +86,21 @@ df_total["coingecko_links"] = df_total["cg_id"].apply(
     lambda x: f"https://www.coingecko.com/en/coins/{x}" if x else ""
 )
 
-# 3. Coluna do TradingView
+# 3. Coluna do TradingView - Link Rápido (Overview)
 df_total["tradingview_links"] = df_total["symbol"].apply(
+    lambda x: f"https://www.tradingview.com/symbols/{x}USDT" if x else ""
+)
+
+# 4. Coluna do TradingView - Link Gráfico (Chart)
+df_total["tradingview_links_chart"] = df_total["symbol"].apply(
     lambda x: f"https://www.tradingview.com/chart/?symbol={x}USDT" if x else ""
 )
 
 
 # ----------------------------
-# Sidebar
+# Sidebar (Ordem Ajustada)
 # ----------------------------
-st.sidebar.header("⚙️ Filtros e Colunas")
+st.sidebar.header("⚙️ Configurações e Filtros")
 
 default_keys = [
     "name",
@@ -115,6 +120,7 @@ default_keys = [
     "links",
     "coingecko_links",
     "tradingview_links",
+    "tradingview_links_chart",
 ]
 perf_keys = [k for k in default_keys if "performance" in k]
 
@@ -138,7 +144,7 @@ quick_select_options = {
     "Todas": default_keys,
     "Performances": ["name", "price"]
     + [k for k in default_keys if "performance" in k]
-    + ["links", "coingecko_links", "tradingview_links"],
+    + ["links", "coingecko_links", "tradingview_links", "tradingview_links_chart"],
     "Volume/Dominance": [
         "name",
         "price",
@@ -152,6 +158,7 @@ quick_select_options = {
         "links",
         "coingecko_links",
         "tradingview_links",
+        "tradingview_links_chart",
     ],
 }
 
@@ -189,36 +196,12 @@ def restore_filters_callback():
     st.session_state.update_inputs = True
 
 
-st.sidebar.button(
-    "🔄 Restaurar Colunas Default",
-    on_click=restore_keys_callback,
-    key="restore_keys_btn",
-)
-st.sidebar.button(
-    "🔄 Restaurar Filtros Default",
-    on_click=restore_filters_callback,
-    key="restore_filters_btn",
-)
-st.sidebar.markdown("---")
-
-st.sidebar.selectbox(
-    "Seleção Rápida de Colunas",
-    options=list(quick_select_options.keys()),
-    key="quick_select_option",
-    on_change=update_selected_keys,
-)
-
-multiselect_key = f"multiselect_{st.session_state.multiselect_key_counter}"
-chaves_selecionadas = st.sidebar.multiselect(
-    "📋 Escolha colunas para consulta",
-    options=[*df_total.columns],
-    default=st.session_state.selected_keys,
-    key=multiselect_key,
-)
-st.session_state.selected_keys = chaves_selecionadas
-
-st.sidebar.markdown("---")
-if "marketcap" in st.session_state.selected_keys:
+# --- 1. Marketcap Mínimo (Seleção Rápida) ---
+# Necessário para definir a borda inferior do filtro Marketcap.
+selected_min_marketcap = marketcap_options[
+    "100M"
+]  # Valor padrão, usado para inicialização
+if "marketcap" in st.session_state.selected_keys or "marketcap" in df_total.columns:
     marketcap_quick_select = st.sidebar.selectbox(
         "Marketcap Mínimo (Seleção Rápida)",
         options=list(marketcap_options.keys()),
@@ -237,74 +220,129 @@ if "marketcap" in st.session_state.selected_keys:
             selected_min_marketcap,
             current_max,
         )
+    st.sidebar.markdown("---")
 
+# --- NOVO: 2. Número de criptomoedas na tabela (Input Numérico) ---
+# Este valor será usado para limitar o DataFrame da tabela de exibição.
+num_cryptos_table = st.sidebar.number_input(
+    "Número de criptomoedas na tabela (1-1000)",
+    min_value=1,
+    max_value=1000,
+    value=1000,  # VALOR ALTERADO PARA 1000
+    key="num_cryptos_table_input",
+    help="Limita o número de criptomoedas exibidas na tabela 'Resultado da Consulta Multi-Nível' (após os filtros, ordenado por Market Cap).",
+)
+st.sidebar.markdown("---")
+
+
+# --- 3. Seleção Rápida de Colunas ---
+st.sidebar.selectbox(
+    "Seleção Rápida de Colunas",
+    options=list(quick_select_options.keys()),
+    key="quick_select_option",
+    on_change=update_selected_keys,
+)
+
+# --- 4. Botões de Restaurar ---
+st.sidebar.markdown("---")
+st.sidebar.button(
+    "🔄 Restaurar Colunas Default",
+    on_click=restore_keys_callback,
+    key="restore_keys_btn",
+)
+st.sidebar.button(
+    "🔄 Restaurar Filtros Default",
+    on_click=restore_filters_callback,
+    key="restore_filters_btn",
+)
+st.sidebar.markdown("---")
+
+# --- 5. Multiselect de Colunas (Filtros e Colunas) ---
+st.sidebar.markdown("### 📋 Seleção de Colunas")
+multiselect_key = f"multiselect_{st.session_state.multiselect_key_counter}"
+chaves_selecionadas = st.sidebar.multiselect(
+    "Escolha colunas para consulta",
+    options=[*df_total.columns],
+    default=st.session_state.selected_keys,
+    key=multiselect_key,
+)
+st.session_state.selected_keys = chaves_selecionadas
+
+st.sidebar.markdown("---")
+
+# --- 6. Sliders e Number Inputs de Filtro ---
+st.sidebar.markdown("### 🎚️ Filtros Numéricos")
 for c in chaves_selecionadas:
     if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
         min_val_df = float(df_total[c].min())
         max_val_df = float(df_total[c].max())
 
         if c == "marketcap":
-            min_val_df = float(df_total[c].min())
-            max_val_df = float(df_total[c].max()) * 1.1
+            min_val_df_limit = float(df_total[c].min())
+            max_val_df_limit = float(df_total[c].max()) * 1.1
             current_min_val = float(
                 st.session_state.slider_values.get(
-                    c, (selected_min_marketcap, max_val_df)
+                    c, (selected_min_marketcap, max_val_df_limit)
                 )[0]
             )
             current_max_val = float(
                 st.session_state.slider_values.get(
-                    c, (selected_min_marketcap, max_val_df)
+                    c, (selected_min_marketcap, max_val_df_limit)
                 )[1]
             )
         elif c != "price" and c != "dominance":
-            min_val_df = min_val_df * 0.9 if min_val_df > 0 else min_val_df * 1.1
-            max_val_df = max_val_df * 1.1 if max_val_df > 0 else max_val_df * 0.9
+            min_val_df_limit = min_val_df * 0.9 if min_val_df > 0 else min_val_df * 1.1
+            max_val_df_limit = max_val_df * 1.1 if max_val_df > 0 else max_val_df * 0.9
             current_min_val, current_max_val = st.session_state.slider_values.get(
-                c, (min_val_df, max_val_df)
+                c, (min_val_df_limit, max_val_df_limit)
             )
         elif c == "price":
-            min_val_df = 0.0
-            max_val_df = df_total["price"].max() * 1.1
+            min_val_df_limit = 0.0
+            max_val_df_limit = df_total["price"].max() * 1.1
             current_min_val, current_max_val = st.session_state.slider_values.get(
-                c, (min_val_df, max_val_df)
+                c, (min_val_df_limit, max_val_df_limit)
             )
         elif c == "dominance":
-            min_val_df = 0.0
-            max_val_df = max_val_df * 1.1
+            min_val_df_limit = 0.0
+            max_val_df_limit = max_val_df * 1.1
             current_min_val, current_max_val = st.session_state.slider_values.get(
-                c, (min_val_df, max_val_df)
+                c, (min_val_df_limit, max_val_df_limit)
             )
         else:
+            min_val_df_limit = min_val_df
+            max_val_df_limit = max_val_df
             current_min_val, current_max_val = st.session_state.slider_values.get(
-                c, (min_val_df, max_val_df)
+                c, (min_val_df_limit, max_val_df_limit)
             )
 
         def update_slider_from_inputs(key):
             min_input = st.session_state.get(f"{key}_min")
             max_input = st.session_state.get(f"{key}_max")
-            min_val_df_ = (
-                float(df_total[key].min()) if key in df_total.columns else min_val_df
-            )
-            max_val_df_ = (
-                float(df_total[key].max()) if key in df_total.columns else max_val_df
-            )
 
+            # Recalcula limites para consistência com as regras de filtro
             if key == "marketcap":
                 min_val_df_ = 100_000_000.0
-                max_val_df_ = max_val_df_ * 1.1
+                max_val_df_ = float(df_total["marketcap"].max()) * 1.1
             elif key != "price" and key != "dominance":
                 min_val_df_ = (
-                    min_val_df_ * 0.9 if min_val_df_ > 0 else min_val_df_ * 1.1
+                    float(df_total[key].min()) * 0.9
+                    if float(df_total[key].min()) > 0
+                    else float(df_total[key].min()) * 1.1
                 )
                 max_val_df_ = (
-                    max_val_df_ * 1.1 if max_val_df_ > 0 else max_val_df_ * 0.9
+                    float(df_total[key].max()) * 1.1
+                    if float(df_total[key].max()) > 0
+                    else float(df_total[key].max()) * 0.9
                 )
             elif key == "price":
                 min_val_df_ = 0.0
                 max_val_df_ = df_total["price"].max() * 1.1
             elif key == "dominance":
                 min_val_df_ = 0.0
-                max_val_df_ = max_val_df_ * 1.1
+                max_val_df_ = df_total["dominance"].max() * 1.1
+            else:
+                min_val_df_ = float(df_total[key].min())
+                max_val_df_ = float(df_total[key].max())
 
             if (
                 min_input is not None
@@ -321,9 +359,9 @@ for c in chaves_selecionadas:
                 st.session_state.slider_values[key] = (min_val_df_, float(max_input))
 
         selected_range = st.sidebar.slider(
-            f"{c} ({human_format(min_val_df)} - {human_format(max_val_df)})",
-            min_value=min_val_df,
-            max_value=max_val_df,
+            f"{c} ({human_format(min_val_df_limit)} - {human_format(max_val_df_limit)})",
+            min_value=min_val_df_limit,
+            max_value=max_val_df_limit,
             value=(current_min_val, current_max_val),
             key=f"{c}_slider",
             on_change=lambda c=c: st.session_state.slider_values.update(
@@ -333,24 +371,27 @@ for c in chaves_selecionadas:
 
         st.sidebar.number_input(
             f"Min {c}",
-            min_value=min_val_df,
-            max_value=max_val_df,
-            value=max(min_val_df, selected_range[0]),
+            min_value=min_val_df_limit,
+            max_value=max_val_df_limit,
+            value=max(min_val_df_limit, selected_range[0]),
             key=f"{c}_min",
             on_change=update_slider_from_inputs,
             args=(c,),
         )
         st.sidebar.number_input(
             f"Max {c}",
-            min_value=min_val_df,
-            max_value=max_val_df,
-            value=min(max_val_df, selected_range[1]),
+            min_value=min_val_df_limit,
+            max_value=max_val_df_limit,
+            value=min(max_val_df_limit, selected_range[1]),
             key=f"{c}_max",
             on_change=update_slider_from_inputs,
             args=(c,),
         )
         st.sidebar.markdown("---")
 
+# ----------------------------
+# Aplicação dos Filtros no DataFrame
+# ----------------------------
 df_filtrado = df_total.copy()
 for c, (min_val, max_val) in st.session_state.slider_values.items():
     if c in df_filtrado.columns and pd.api.types.is_numeric_dtype(df_filtrado[c]):
@@ -359,12 +400,19 @@ for c, (min_val, max_val) in st.session_state.slider_values.items():
             | df_filtrado[c].isnull()
         ]
 
+# Aplica o limite de linhas da tabela (num_cryptos_table)
+df_display = df_filtrado.copy()
+if "marketcap" in df_display.columns:
+    df_display = df_display.nlargest(int(num_cryptos_table), "marketcap", keep="all")
+
 # ----------------------------
 # Resultado da Consulta Multi-Nível
 # ----------------------------
-st.markdown("## 🔎 Resultado da Consulta Multi-Nível")
+st.markdown(
+    f"## 🔎 Resultado da Consulta Multi-Nível (Top {len(df_display)} de {num_cryptos_table} Pedidas)"
+)
 
-df_display = df_filtrado.copy()
+
 renomear = {
     "performance.min15": "perf.min15",
     "performance.hour": "perf.hour",
@@ -374,21 +422,21 @@ renomear = {
     "performance.month": "perf.month",
     "performance.month3": "perf.month3",
     "performance.year": "perf.year",
-    "coingecko_links": "CoinGecko",  # Renomeia a coluna para exibição
-    "tradingview_links": "TradingView",  # Renomeia a coluna para exibição
+    "marketcap": "Market Cap",
+    "coingecko_links": "CoinGecko",
+    "tradingview_links": "TView (F)",
+    "tradingview_links_chart": "TView (C)",
 }
 df_display = df_display.rename(columns=renomear)
 
 ordered_cols = []
 perf_renomeadas = [renomear.get(k, k) for k in perf_keys]
 fixed_keys = ["name", "symbol", "price", "marketcap", "volume", "dominance"]
-display_keys = {k: k.capitalize() for k in fixed_keys}
-display_keys["dominance"] = "Dominance"
-display_keys["price"] = "Price"
 
-for key in fixed_keys:
-    if key in st.session_state.selected_keys and key in df_display.columns:
-        ordered_cols.append(key)
+for key in ["name", "symbol", "price", "marketcap", "volume", "dominance"]:
+    renamed_key = renomear.get(key, key)
+    if key in st.session_state.selected_keys and renamed_key in df_display.columns:
+        ordered_cols.append(renamed_key)
 
 for key in perf_keys:
     if key in st.session_state.selected_keys:
@@ -396,7 +444,6 @@ for key in perf_keys:
         if renamed_key and renamed_key in df_display.columns:
             ordered_cols.append(renamed_key)
 
-# Lógica para posicionar os links ao final das colunas fixas e de performance
 if "links" in st.session_state.selected_keys and "links" in df_display.columns:
     ordered_cols.append("links")
 if (
@@ -404,18 +451,29 @@ if (
     and "CoinGecko" in df_display.columns
 ):
     ordered_cols.append("CoinGecko")
+
 if (
     "tradingview_links" in st.session_state.selected_keys
-    and "TradingView" in df_display.columns
+    and "TView (F)" in df_display.columns
 ):
-    ordered_cols.append("TradingView")
+    ordered_cols.append("TView (F)")
+if (
+    "tradingview_links_chart" in st.session_state.selected_keys
+    and "TView (C)" in df_display.columns
+):
+    ordered_cols.append("TView (C)")
 
 for key in st.session_state.selected_keys:
-    # Adiciona colunas não classificadas
     if (
-        key not in fixed_keys
+        key not in ["name", "symbol", "price", "marketcap", "volume", "dominance"]
         and key not in perf_keys
-        and key not in ["links", "coingecko_links", "tradingview_links"]
+        and key
+        not in [
+            "links",
+            "coingecko_links",
+            "tradingview_links",
+            "tradingview_links_chart",
+        ]
         and key in df_display.columns
     ):
         ordered_cols.append(key)
@@ -439,7 +497,6 @@ for col in perf_renomeadas:
             df_display_final[col], errors="coerce", downcast="float"
         )
 
-        # --- Configurações de Largura Ajustadas (Year, Month3, Month) ---
         if col == "perf.year":
             column_config[col] = st.column_config.NumberColumn(
                 label="Year", format="%.2f%%", width=78
@@ -452,7 +509,6 @@ for col in perf_renomeadas:
             column_config[col] = st.column_config.NumberColumn(
                 label="Month", format="%.2f%%", width=70
             )
-        # --- Configurações Padrão para as Outras Colunas de Performance ---
         else:
             column_config[col] = st.column_config.NumberColumn(
                 label=col.replace("perf.", "").capitalize(), format="%.2f%%"
@@ -475,12 +531,12 @@ if "price" in df_display_final.columns:
     column_config["price"] = st.column_config.NumberColumn(
         label="Price", format="$ %.8f"
     )
-if "marketcap" in df_display_final.columns:
-    df_display_final["marketcap"] = pd.to_numeric(
-        df_display_final["marketcap"], errors="coerce", downcast="float"
+if "Market Cap" in df_display_final.columns:
+    df_display_final["Market Cap"] = pd.to_numeric(
+        df_display_final["Market Cap"], errors="coerce", downcast="float"
     )
-    column_config["marketcap"] = st.column_config.NumberColumn(
-        label="Marketcap", format="compact", help="Formato numérico sem formatação"
+    column_config["Market Cap"] = st.column_config.NumberColumn(
+        label="Market Cap", format="compact", help="Capitalização de Mercado"
     )
 if "volume" in df_display_final.columns:
     df_display_final["volume"] = pd.to_numeric(
@@ -493,15 +549,21 @@ if "links" in df_display_final.columns:
     column_config["links"] = st.column_config.LinkColumn(
         "CoinMarketCap", help="Link para o CoinMarketCap", display_text="Ver"
     )
-# Configuração do link CoinGecko
 if "CoinGecko" in df_display_final.columns:
     column_config["CoinGecko"] = st.column_config.LinkColumn(
         "CoinGecko", help="Link para o CoinGecko", display_text="Ver"
     )
-# Configuração do link TradingView
-if "TradingView" in df_display_final.columns:
-    column_config["TradingView"] = st.column_config.LinkColumn(
-        "TradingView", help="Link para o TradingView", display_text="Gráfico"
+if "TView (F)" in df_display_final.columns:
+    column_config["TView (F)"] = st.column_config.LinkColumn(
+        "TView (F)",
+        help="Link para o Overview Rápido no TradingView",
+        display_text="Fast",
+    )
+if "TView (C)" in df_display_final.columns:
+    column_config["TView (C)"] = st.column_config.LinkColumn(
+        "TView (C)",
+        help="Link para o Gráfico Completo no TradingView",
+        display_text="Chart",
     )
 
 if not df_display_final.empty:
@@ -521,7 +583,7 @@ if not df_display_final.empty:
         hide_index=False,
     )
 else:
-    st.warning("⚠️ Nenhuma chave válida selecionada.")
+    st.warning("⚠️ Nenhuma chave válida selecionada ou filtro muito restritivo.")
 
 # ----------------------------
 # Alertas Top 3 Performance
@@ -535,7 +597,6 @@ intervalos = {
     "performance.month3": "3 Meses",
 }
 
-# Mapeamento da chave de performance para a chave de variação de rank
 rank_map = {
     "performance.hour": "rankDiffs.hour",
     "performance.day": "rankDiffs.day",
@@ -544,7 +605,6 @@ rank_map = {
     "performance.month3": "rankDiffs.month3",
 }
 
-# Inclui as colunas 'slug', 'links', 'coingecko_links', 'rank', 'tradingview_links' e TODAS as colunas rankDiffs necessárias
 colunas_essenciais = [
     "name",
     "slug",
@@ -554,13 +614,14 @@ colunas_essenciais = [
     "links",
     "coingecko_links",
     "tradingview_links",
+    "tradingview_links_chart",
 ] + list(rank_map.values())
 colunas_disponiveis = [col for col in colunas_essenciais if col in df_filtrado.columns]
 
 for key, label in intervalos.items():
     rank_key = rank_map.get(key)
 
-    # Verifica se a chave de performance e a chave de rank estão disponíveis no DataFrame
+    # Nota: df_filtrado (sem limite de linhas) é usado aqui para que os alertas usem todos os dados filtrados
     if (
         key in df_filtrado.columns
         and rank_key in df_filtrado.columns
@@ -568,11 +629,9 @@ for key, label in intervalos.items():
     ):
         df_filtrado[key] = pd.to_numeric(df_filtrado[key], errors="coerce")
 
-        # Cria uma lista de colunas para seleção para garantir que o rank_key e as colunas de link estejam incluídos
-        cols_para_selecao = [c for c in colunas_disponiveis if c != rank_key] + [
-            rank_key,
-            key,
-        ]
+        cols_para_selecao = [
+            c for c in colunas_disponiveis if c not in [rank_key, key]
+        ] + [rank_key, key]
 
         top_altas = df_filtrado.nlargest(3, key)[cols_para_selecao]
         top_baixas = df_filtrado.nsmallest(3, key)[cols_para_selecao]
@@ -580,78 +639,76 @@ for key, label in intervalos.items():
         with colA:
             st.markdown(f"### 🟢 Maiores Altas - {label}")
             for _, r in top_altas.iterrows():
-                # Formata o nome como link CoinMarketCap
                 link_name_text = r.get("name", "N/A")
                 if r.get("links"):
                     link_name_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
 
-                # Formata o SÍMBOLO (sem link)
                 symbol_display = f"**[{r.get('symbol', 'N/A')}]**"
 
-                # Obtém o rank e a variação
                 current_rank = r.get("rank", "N/A")
                 rank_change = r.get(rank_key)
                 rank_change_str = (
                     str(int(rank_change)) if not pd.isna(rank_change) else "N/A"
                 )
 
-                # Formata o rank com o link CoinGecko
                 rank_info_text = f"[{current_rank} / {rank_change_str}]"
                 if r.get("coingecko_links"):
                     rank_info = f"**[{rank_info_text}]({r.get('coingecko_links')})**"
                 else:
                     rank_info = f"**{rank_info_text}**"
 
-                # Formata o preço (agora sem link)
-                price_display = f"${r.get('price', 0):.8f}"
-
-                # NOVO: Formata a variação (%) com link TradingView
-                perf_text = f"{r.get(key, 0):.2f}%"
+                price_text = f"${r.get('price', 0):.8f}"
                 if r.get("tradingview_links"):
-                    perf_display = f"**[{perf_text}]({r.get('tradingview_links')})**"  # Aplica o link à variação
+                    price_display = f"**[{price_text}]({r.get('tradingview_links')})**"
+                else:
+                    price_display = f"**{price_text}**"
+
+                perf_text = f"{r.get(key, 0):.2f}%"
+                if r.get("tradingview_links_chart"):
+                    perf_display = (
+                        f"**[{perf_text}]({r.get('tradingview_links_chart')})**"
+                    )
                 else:
                     perf_display = f"**{perf_text}**"
 
-                # Formato final: [name (CMC link)] [symbol] [rank / rank_change (CoinGecko link)] (price | variation% (TradingView link))
                 st.markdown(
                     f"- {link_name_text} {symbol_display} {rank_info} ({price_display} | {perf_display})"
                 )
         with colB:
             st.markdown(f"### 🔴 Maiores Baixas - {label}")
             for _, r in top_baixas.iterrows():
-                # Formata o nome como link CoinMarketCap
                 link_name_text = r.get("name", "N/A")
                 if r.get("links"):
                     link_name_text = f"[{r.get('name', 'N/A')}]({r.get('links')})"
 
-                # Formata o SÍMBOLO (sem link)
                 symbol_display = f"**[{r.get('symbol', 'N/A')}]**"
 
-                # Obtém o rank e a variação
                 current_rank = r.get("rank", "N/A")
                 rank_change = r.get(rank_key)
                 rank_change_str = (
                     str(int(rank_change)) if not pd.isna(rank_change) else "N/A"
                 )
 
-                # Formata o rank com o link CoinGecko
                 rank_info_text = f"[{current_rank} / {rank_change_str}]"
                 if r.get("coingecko_links"):
                     rank_info = f"**[{rank_info_text}]({r.get('coingecko_links')})**"
                 else:
                     rank_info = f"**{rank_info_text}**"
 
-                # Formata o preço (agora sem link)
-                price_display = f"${r.get('price', 0):.8f}"
-
-                # NOVO: Formata a variação (%) com link TradingView
-                perf_text = f"{r.get(key, 0):.2f}%"
+                price_text = f"${r.get('price', 0):.8f}"
                 if r.get("tradingview_links"):
-                    perf_display = f"**[{perf_text}]({r.get('tradingview_links')})**"  # Aplica o link à variação
+                    price_display = f"**[{price_text}]({r.get('tradingview_links')})**"
+                else:
+                    price_display = f"**{price_text}**"
+
+                perf_text = f"{r.get(key, 0):.2f}%"
+                if r.get("tradingview_links_chart"):
+                    perf_display = (
+                        f"**[{perf_text}]({r.get('tradingview_links_chart')})**"
+                    )
                 else:
                     perf_display = f"**{perf_text}**"
 
-                # Formato final: [name (CMC link)] [symbol] [rank / rank_change (CoinGecko link)] (price | variation% (TradingView link))
                 st.markdown(
                     f"- {link_name_text} {symbol_display} {rank_info} ({price_display} | {perf_display})"
                 )
@@ -666,13 +723,23 @@ for key, label in intervalos.items():
 st.markdown("## 💾 Exportação de Dados")
 if not df_display_final.empty:
     df_export = df_display_final.copy()
+    cols_to_drop = [
+        "links",
+        "coingecko_links",
+        "tradingview_links",
+        "tradingview_links_chart",
+    ]
+    df_export = df_export.drop(
+        columns=[col for col in cols_to_drop if col in df_export.columns]
+    )
+
     dados_excel = converter_para_excel(df_export)
     st.download_button("📥 Baixar dados filtrados", dados_excel, "dados_filtrados.xlsx")
 
 # ----------------------------
 # Estatísticas de Desempenho
 # ----------------------------
-st.markdown("## 📊 Estatísticas de Desempenho")
+st.markdown("## 📊 Estatísticas de Desempenho (Top 1000 - Sem Stablecoins)")
 if not df.empty:
     df_no_stablecoins = df[df["stable"] == False].copy()
     perf_keys_available = [k for k in perf_keys if k in df_no_stablecoins.columns]
@@ -726,18 +793,23 @@ else:
     st.warning("⚠️ Não há dados disponíveis para calcular estatísticas.")
 
 # ----------------------------
-# Estatísticas de Desempenho Filtrada
+# Estatísticas de Desempenho Filtrada (Reintroduzindo o controle aqui)
 # ----------------------------
-st.markdown("## 📊 Estatísticas de Desempenho Filtrada")
+st.markdown("---")
+# O controle foi movido de volta para esta seção
+num_cryptos = st.number_input(
+    "Número de criptomoedas a considerar (1-1000)",
+    min_value=1,
+    max_value=1000,
+    value=100,
+    key="num_cryptos_stats_input",
+    help="Define o número de criptomoedas (ordenadas por Market Cap) usadas no cálculo das estatísticas abaixo. Não afeta a tabela principal.",
+)
+
+st.markdown(f"## 📊 Estatísticas de Desempenho (Top {num_cryptos} - Sem Stablecoins)")
 if not df_total.empty:
     df_no_stablecoins_filtered = df_total[df_total["stable"] == False].copy()
-    num_cryptos = st.number_input(
-        "Número de criptomoedas a considerar (1-1000)",
-        min_value=1,
-        max_value=1000,
-        value=100,
-        key="num_cryptos_input",
-    )
+
     df_top_cryptos = (
         df_no_stablecoins_filtered.nlargest(int(num_cryptos), "marketcap", keep="all")
         if "marketcap" in df_no_stablecoins_filtered.columns

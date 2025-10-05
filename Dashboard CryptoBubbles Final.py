@@ -130,6 +130,9 @@ if "slider_values" not in st.session_state:
     st.session_state.slider_values = {}
 if "multiselect_key_counter" not in st.session_state:
     st.session_state.multiselect_key_counter = 0
+if "multiselect_temp_key" not in st.session_state:
+    st.session_state.multiselect_temp_key = default_keys.copy()
+
 
 marketcap_options = {
     "0": 0.0,
@@ -163,74 +166,145 @@ quick_select_options = {
 }
 
 
+# CRÍTICO: Função de callback para garantir que o valor do multiselect seja copiado na hora
+def multiselect_callback():
+    # Copia o valor do widget (que está na chave multiselect_X) para o estado persistente
+    st.session_state.selected_keys = st.session_state[
+        f"multiselect_{st.session_state.multiselect_key_counter}"
+    ]
+
+
+# Função para forçar a atualização da seleção e re-renderizar o multiselect
 def update_selected_keys():
     selected_option = st.session_state.quick_select_option
     st.session_state.selected_keys = quick_select_options[selected_option]
+    # Força a re-renderização mudando a chave do multiselect
     st.session_state.multiselect_key_counter += 1
+
+
+def update_marketcap_min():
+    """Atualiza o filtro de marketcap com base na seleção rápida."""
+    marketcap_key = "marketcap"
+    selected_min_cap = marketcap_options[st.session_state.marketcap_quick_select]
+
+    # 1. Apenas atualiza o slider_values (o que realmente filtra)
+    if marketcap_key not in st.session_state.slider_values:
+        max_val_marketcap = round(float(df_total["marketcap"].max()) * 1.1, 2)
+        st.session_state.slider_values[marketcap_key] = (
+            selected_min_cap,
+            max_val_marketcap,
+        )
+    else:
+        current_max = st.session_state.slider_values[marketcap_key][1]
+        st.session_state.slider_values[marketcap_key] = (selected_min_cap, current_max)
+
+    # 2. Atualiza a key do number_input para refletir a mudança
+    st.session_state[f"{marketcap_key}_min"] = selected_min_cap
 
 
 def restore_keys_callback():
     st.session_state.selected_keys = default_keys.copy()
+    # Força a re-renderização mudando a chave do multiselect
     st.session_state.multiselect_key_counter += 1
 
 
 def restore_filters_callback():
-    for c in default_keys:
-        if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
+    """Restaura todos os filtros numéricos para o valor padrão."""
+    for c in df_total.columns:
+        if c in default_keys and pd.api.types.is_numeric_dtype(df_total[c]):
             min_val = float(df_total[c].min())
             max_val = float(df_total[c].max())
-            if c == "marketcap":
-                min_val = 100_000_000.0
-                max_val = max_val * 1.1
-            elif c != "price" and c != "dominance":
-                min_val = min_val * 0.9 if min_val > 0 else min_val * 1.1
-                max_val = max_val * 1.1 if max_val > 0 else max_val * 0.9
-            elif c == "dominance":
-                min_val = 0.0
-                max_val = max_val * 1.1
-            st.session_state.slider_values[c] = (min_val, max_val)
-    if "price" in df_total.columns:
-        max_price = df_total["price"].max() * 1.1
-        st.session_state.slider_values["price"] = (0.0, max_price)
 
-    st.session_state.update_inputs = True
+            # --- Regra de Limite do Widget (com margem de 10%/20% e arredondamento) ---
+            if c == "marketcap":
+                # Limite do widget: limite absoluto do DF
+                min_val_limit = round(float(df_total[c].min()), 2)
+                max_val_limit = round(max_val * 1.1, 2)
+
+                # Valor inicial do state (usa 100M)
+                min_val_state = marketcap_options["100M"]
+                max_val_state = max_val_limit
+
+            elif c != "price" and c != "dominance":
+                # Limite do Widget (Min_value e Max_value)
+                min_val_limit = round(
+                    min_val * 0.9 if min_val > 0 else min_val * 1.1, 2
+                )
+                max_val_limit = round(
+                    max_val * 1.1 if max_val > 0 else max_val * 0.9, 2
+                )
+
+                # Valor inicial do state (usa o limite calculado)
+                min_val_state = min_val_limit
+                max_val_state = max_val_limit
+
+            elif c == "price":
+                min_val_limit = 0.0
+                # CORREÇÃO CRÍTICA: Aumenta a margem para 20% no price para evitar erros de float
+                max_val_limit = round(df_total["price"].max() * 1.2, 2)
+
+                min_val_state = 0.0
+                max_val_state = max_val_limit
+
+            elif c == "dominance":
+                min_val_limit = 0.0
+                max_val_limit = round(max_val * 1.1, 2)
+
+                min_val_state = 0.0
+                max_val_state = max_val_limit
+
+            # --- Atribuição ao Session State ---
+            # Garante que o valor no state não é menor/maior que o limite do widget
+            st.session_state.slider_values[c] = (min_val_state, max_val_state)
+
+            st.session_state[f"{c}_min"] = min_val_state
+            st.session_state[f"{c}_max"] = max_val_state
 
 
 # --- 1. Marketcap Mínimo (Seleção Rápida) ---
-# Necessário para definir a borda inferior do filtro Marketcap.
-selected_min_marketcap = marketcap_options[
-    "100M"
-]  # Valor padrão, usado para inicialização
+# Inicialização dos valores do Market Cap (Market Cap Mínimo é 100M por padrão)
+if "marketcap" in df_total.columns:
+    max_val_marketcap = round(float(df_total["marketcap"].max()) * 1.1, 2)
+    min_val_marketcap_default = marketcap_options["100M"]
+
+    # Inicializa slider_values
+    if "marketcap" not in st.session_state.slider_values:
+        st.session_state.slider_values["marketcap"] = (
+            min_val_marketcap_default,
+            max_val_marketcap,
+        )
+
+    # Inicialização das keys dos number_inputs
+    if "marketcap_min" not in st.session_state:
+        # Usa o valor do slider (100M)
+        st.session_state["marketcap_min"] = st.session_state.slider_values["marketcap"][
+            0
+        ]
+    if "marketcap_max" not in st.session_state:
+        st.session_state["marketcap_max"] = st.session_state.slider_values["marketcap"][
+            1
+        ]
+
+
 if "marketcap" in st.session_state.selected_keys or "marketcap" in df_total.columns:
     marketcap_quick_select = st.sidebar.selectbox(
         "Marketcap Mínimo (Seleção Rápida)",
         options=list(marketcap_options.keys()),
         index=list(marketcap_options.keys()).index("100M"),
+        key="marketcap_quick_select",
+        on_change=update_marketcap_min,
+        help="Define o Market Cap mínimo que uma criptomoeda deve ter. O valor é refletido no slider de Marketcap.",
     )
-    selected_min_marketcap = marketcap_options[marketcap_quick_select]
-    if "marketcap" not in st.session_state.slider_values:
-        max_val_marketcap = float(df_total["marketcap"].max()) * 1.1
-        st.session_state.slider_values["marketcap"] = (
-            selected_min_marketcap,
-            max_val_marketcap,
-        )
-    else:
-        current_max = st.session_state.slider_values["marketcap"][1]
-        st.session_state.slider_values["marketcap"] = (
-            selected_min_marketcap,
-            current_max,
-        )
     st.sidebar.markdown("---")
 
-# --- NOVO: 2. Número de criptomoedas na tabela (Input Numérico) ---
-# Este valor será usado para limitar o DataFrame da tabela de exibição.
+# --- 2. Número de criptomoedas na tabela (Input Numérico) ---
 num_cryptos_table = st.sidebar.number_input(
-    "Número de criptomoedas na tabela (1-1000)",
+    "Número de criptomoedas (1-1000)",
     min_value=1,
     max_value=1000,
-    value=1000,  # VALOR ALTERADO PARA 1000
+    value=1000,
     key="num_cryptos_table_input",
-    help="Limita o número de criptomoedas exibidas na tabela 'Resultado da Consulta Multi-Nível' (após os filtros, ordenado por Market Cap).",
+    help="Limita o número de criptomoedas exibidas na tabela 'Resultado da Consulta Multi-Nível' e usadas nos alertas (após os filtros, ordenado por Market Cap).",
 )
 st.sidebar.markdown("---")
 
@@ -249,11 +323,13 @@ st.sidebar.button(
     "🔄 Restaurar Colunas Default",
     on_click=restore_keys_callback,
     key="restore_keys_btn",
+    help="Restaura a lista de colunas exibidas e filtráveis para a seleção padrão (Todas).",
 )
 st.sidebar.button(
     "🔄 Restaurar Filtros Default",
     on_click=restore_filters_callback,
     key="restore_filters_btn",
+    help="Restaura todos os sliders de filtros numéricos para o valor mínimo e máximo do conjunto de dados.",
 )
 st.sidebar.markdown("---")
 
@@ -265,85 +341,115 @@ chaves_selecionadas = st.sidebar.multiselect(
     options=[*df_total.columns],
     default=st.session_state.selected_keys,
     key=multiselect_key,
+    on_change=multiselect_callback,
+    help="Selecione as colunas que você deseja ver na tabela. Colunas numéricas selecionadas aparecerão na seção 'Filtros Numéricos' abaixo.",
 )
-st.session_state.selected_keys = chaves_selecionadas
 
 st.sidebar.markdown("---")
 
 # --- 6. Sliders e Number Inputs de Filtro ---
 st.sidebar.markdown("### 🎚️ Filtros Numéricos")
-for c in chaves_selecionadas:
+for c in st.session_state.selected_keys:
     if c in df_total.columns and pd.api.types.is_numeric_dtype(df_total[c]):
         min_val_df = float(df_total[c].min())
         max_val_df = float(df_total[c].max())
 
+        # Determinação dos limites e valores atuais do slider
         if c == "marketcap":
-            min_val_df_limit = float(df_total[c].min())
-            max_val_df_limit = float(df_total[c].max()) * 1.1
-            current_min_val = float(
-                st.session_state.slider_values.get(
-                    c, (selected_min_marketcap, max_val_df_limit)
-                )[0]
-            )
-            current_max_val = float(
-                st.session_state.slider_values.get(
-                    c, (selected_min_marketcap, max_val_df_limit)
-                )[1]
-            )
+            min_val_df_limit = round(
+                float(df_total[c].min()), 2
+            )  # Limite mínimo absoluto do DF
+            max_val_df_limit = round(float(df_total[c].max()) * 1.1, 2)
+            widget_min_value = min_val_df_limit
+            default_min_for_partial_update = marketcap_options["100M"]
+
         elif c != "price" and c != "dominance":
-            min_val_df_limit = min_val_df * 0.9 if min_val_df > 0 else min_val_df * 1.1
-            max_val_df_limit = max_val_df * 1.1 if max_val_df > 0 else max_val_df * 0.9
-            current_min_val, current_max_val = st.session_state.slider_values.get(
-                c, (min_val_df_limit, max_val_df_limit)
+            min_val_df_limit = round(
+                min_val_df * 0.9 if min_val_df > 0 else min_val_df * 1.1, 2
             )
+            max_val_df_limit = round(
+                max_val_df * 1.1 if max_val_df > 0 else max_val_df * 0.9, 2
+            )
+            widget_min_value = min_val_df_limit
+            default_min_for_partial_update = min_val_df_limit
+
         elif c == "price":
             min_val_df_limit = 0.0
-            max_val_df_limit = df_total["price"].max() * 1.1
-            current_min_val, current_max_val = st.session_state.slider_values.get(
-                c, (min_val_df_limit, max_val_df_limit)
-            )
+            # CORREÇÃO CRÍTICA: Aumenta a margem para 20% no price para evitar erros de float
+            max_val_df_limit = round(df_total["price"].max() * 1.2, 2)
+            widget_min_value = min_val_df_limit
+            default_min_for_partial_update = 0.0
+
         elif c == "dominance":
             min_val_df_limit = 0.0
-            max_val_df_limit = max_val_df * 1.1
-            current_min_val, current_max_val = st.session_state.slider_values.get(
-                c, (min_val_df_limit, max_val_df_limit)
-            )
+            max_val_df_limit = round(max_val_df * 1.1, 2)
+            widget_min_value = min_val_df_limit
+            default_min_for_partial_update = 0.0
         else:
-            min_val_df_limit = min_val_df
-            max_val_df_limit = max_val_df
-            current_min_val, current_max_val = st.session_state.slider_values.get(
-                c, (min_val_df_limit, max_val_df_limit)
-            )
+            min_val_df_limit = round(min_val_df, 2)
+            max_val_df_limit = round(max_val_df, 2)
+            widget_min_value = min_val_df_limit
+            default_min_for_partial_update = min_val_df_limit
+
+        # Pega os valores atuais do slider (que já está no session_state/default)
+        current_min_val, current_max_val = st.session_state.slider_values.get(
+            c, (default_min_for_partial_update, max_val_df_limit)
+        )
+
+        # Garante que as chaves dos number_inputs existem
+        if f"{c}_min" not in st.session_state:
+            st.session_state[f"{c}_min"] = current_min_val
+        if f"{c}_max" not in st.session_state:
+            st.session_state[f"{c}_max"] = current_max_val
+
+        # CRÍTICO: Forçar o valor do session_state a ser válido para o min/max do widget
+        st.session_state[f"{c}_min"] = max(
+            st.session_state[f"{c}_min"], widget_min_value
+        )
+        st.session_state[f"{c}_max"] = min(
+            st.session_state[f"{c}_max"], max_val_df_limit
+        )  # Adiciona a checagem de max_value
 
         def update_slider_from_inputs(key):
+            """Atualiza o valor do slider no session_state a partir dos number_inputs."""
             min_input = st.session_state.get(f"{key}_min")
             max_input = st.session_state.get(f"{key}_max")
 
-            # Recalcula limites para consistência com as regras de filtro
+            # Recalcula limites/default min para atualizações parciais
             if key == "marketcap":
-                min_val_df_ = 100_000_000.0
-                max_val_df_ = float(df_total["marketcap"].max()) * 1.1
+                max_val_df_ = round(float(df_total["marketcap"].max()) * 1.1, 2)
+                default_min_for_partial_update_func = marketcap_options["100M"]
             elif key != "price" and key != "dominance":
-                min_val_df_ = (
-                    float(df_total[key].min()) * 0.9
-                    if float(df_total[key].min()) > 0
-                    else float(df_total[key].min()) * 1.1
+                min_val_df_ = round(
+                    float(
+                        df_total[key].min() * 0.9
+                        if float(df_total[key].min()) > 0
+                        else float(df_total[key].min()) * 1.1
+                    ),
+                    2,
                 )
-                max_val_df_ = (
-                    float(df_total[key].max()) * 1.1
-                    if float(df_total[key].max()) > 0
-                    else float(df_total[key].max()) * 0.9
+                max_val_df_ = round(
+                    float(
+                        df_total[key].max() * 1.1
+                        if float(df_total[key].max()) > 0
+                        else float(df_total[key].max()) * 0.9
+                    ),
+                    2,
                 )
+                default_min_for_partial_update_func = min_val_df_
             elif key == "price":
-                min_val_df_ = 0.0
-                max_val_df_ = df_total["price"].max() * 1.1
+                # Usa 1.2 na função
+                max_val_df_ = round(df_total["price"].max() * 1.2, 2)
+                default_min_for_partial_update_func = 0.0
             elif key == "dominance":
-                min_val_df_ = 0.0
-                max_val_df_ = df_total["dominance"].max() * 1.1
+                max_val_df_ = round(df_total["dominance"].max() * 1.1, 2)
+                default_min_for_partial_update_func = 0.0
             else:
-                min_val_df_ = float(df_total[key].min())
-                max_val_df_ = float(df_total[key].max())
+                min_val_df_ = round(float(df_total[key].min()), 2)
+                max_val_df_ = round(float(df_total[key].max()), 2)
+                default_min_for_partial_update_func = min_val_df_
 
+            # Atualiza o slider_values com os valores digitados
             if (
                 min_input is not None
                 and max_input is not None
@@ -356,33 +462,48 @@ for c in chaves_selecionadas:
             elif min_input is not None and max_input is None:
                 st.session_state.slider_values[key] = (float(min_input), max_val_df_)
             elif max_input is not None and min_input is None:
-                st.session_state.slider_values[key] = (min_val_df_, float(max_input))
+                st.session_state.slider_values[key] = (
+                    default_min_for_partial_update_func,
+                    float(max_input),
+                )
 
+        # O valor do slider é obtido diretamente dos valores do session_state
         selected_range = st.sidebar.slider(
-            f"{c} ({human_format(min_val_df_limit)} - {human_format(max_val_df_limit)})",
-            min_value=min_val_df_limit,
+            f"{c} ({human_format(widget_min_value)} - {human_format(max_val_df_limit)})",
+            min_value=widget_min_value,
             max_value=max_val_df_limit,
-            value=(current_min_val, current_max_val),
+            value=(st.session_state[f"{c}_min"], st.session_state[f"{c}_max"]),
             key=f"{c}_slider",
-            on_change=lambda c=c: st.session_state.slider_values.update(
-                {c: st.session_state[f"{c}_slider"]}
+            # Atualiza o number input Mín e Máx ao mover o slider.
+            on_change=lambda c=c: (
+                st.session_state.slider_values.update(
+                    {c: st.session_state[f"{c}_slider"]}
+                ),
+                st.session_state.update(
+                    {f"{c}_min": st.session_state[f"{c}_slider"][0]}
+                ),
+                st.session_state.update(
+                    {f"{c}_max": st.session_state[f"{c}_slider"][1]}
+                ),
             ),
+            help=f"Filtra a coluna '{c}' para valores dentro deste intervalo. A tabela e os alertas só mostrarão criptomoedas que atendam a este critério.",
         )
 
+        # Number Input Mínimo
         st.sidebar.number_input(
             f"Min {c}",
-            min_value=min_val_df_limit,
+            min_value=widget_min_value,
             max_value=max_val_df_limit,
-            value=max(min_val_df_limit, selected_range[0]),
             key=f"{c}_min",
             on_change=update_slider_from_inputs,
             args=(c,),
         )
+
+        # Number Input Máximo
         st.sidebar.number_input(
             f"Max {c}",
-            min_value=min_val_df_limit,
+            min_value=widget_min_value,
             max_value=max_val_df_limit,
-            value=min(max_val_df_limit, selected_range[1]),
             key=f"{c}_max",
             on_change=update_slider_from_inputs,
             args=(c,),
@@ -403,13 +524,15 @@ for c, (min_val, max_val) in st.session_state.slider_values.items():
 # Aplica o limite de linhas da tabela (num_cryptos_table)
 df_display = df_filtrado.copy()
 if "marketcap" in df_display.columns:
-    df_display = df_display.nlargest(int(num_cryptos_table), "marketcap", keep="all")
+    df_display = df_display.nlargest(
+        int(st.session_state.num_cryptos_table_input), "marketcap", keep="all"
+    )
 
 # ----------------------------
 # Resultado da Consulta Multi-Nível
 # ----------------------------
 st.markdown(
-    f"## 🔎 Resultado da Consulta Multi-Nível (Top {len(df_display)} de {num_cryptos_table} Pedidas)"
+    f"## 🔎 Resultado da Consulta Multi-Nível (Top {len(df_display)} de {st.session_state.num_cryptos_table_input} Pedidas)"
 )
 
 
@@ -429,60 +552,32 @@ renomear = {
 }
 df_display = df_display.rename(columns=renomear)
 
+# Prioriza a ordem das default_keys, colocando novas chaves no final
 ordered_cols = []
-perf_renomeadas = [renomear.get(k, k) for k in perf_keys]
-fixed_keys = ["name", "symbol", "price", "marketcap", "volume", "dominance"]
+selected_set = set(st.session_state.selected_keys)
+current_df_cols = set(df_display.columns)
 
-for key in ["name", "symbol", "price", "marketcap", "volume", "dominance"]:
-    renamed_key = renomear.get(key, key)
-    if key in st.session_state.selected_keys and renamed_key in df_display.columns:
-        ordered_cols.append(renamed_key)
-
-for key in perf_keys:
-    if key in st.session_state.selected_keys:
-        renamed_key = renomear.get(key)
-        if renamed_key and renamed_key in df_display.columns:
+# 1. Adiciona as colunas padrão que estão selecionadas (na ordem padrão)
+for key in default_keys:
+    if key in selected_set:
+        renamed_key = renomear.get(key, key)
+        if renamed_key in current_df_cols:
             ordered_cols.append(renamed_key)
 
-if "links" in st.session_state.selected_keys and "links" in df_display.columns:
-    ordered_cols.append("links")
-if (
-    "coingecko_links" in st.session_state.selected_keys
-    and "CoinGecko" in df_display.columns
-):
-    ordered_cols.append("CoinGecko")
-
-if (
-    "tradingview_links" in st.session_state.selected_keys
-    and "TView (F)" in df_display.columns
-):
-    ordered_cols.append("TView (F)")
-if (
-    "tradingview_links_chart" in st.session_state.selected_keys
-    and "TView (C)" in df_display.columns
-):
-    ordered_cols.append("TView (C)")
-
+# 2. Adiciona colunas que foram selecionadas, mas não estavam na lista padrão (novas)
 for key in st.session_state.selected_keys:
-    if (
-        key not in ["name", "symbol", "price", "marketcap", "volume", "dominance"]
-        and key not in perf_keys
-        and key
-        not in [
-            "links",
-            "coingecko_links",
-            "tradingview_links",
-            "tradingview_links_chart",
-        ]
-        and key in df_display.columns
-    ):
-        ordered_cols.append(key)
+    if key not in default_keys:
+        renamed_key = renomear.get(key, key)
+        if renamed_key in current_df_cols and renamed_key not in ordered_cols:
+            ordered_cols.append(renamed_key)
 
+# Remove duplicatas (apenas por garantia)
 ordered_cols = list(dict.fromkeys(ordered_cols))
 
 df_display_final = df_display[
     [col for col in ordered_cols if col in df_display.columns]
 ].copy()
+
 
 if "dominance" in df_display_final.columns:
     df_display_final["dominance"] = (
@@ -490,9 +585,13 @@ if "dominance" in df_display_final.columns:
         * 100
     )
 
+# Usar set para remover duplicações na lista de colunas a serem formatadas
+perf_renomeadas = list(set([renomear.get(k, k) for k in perf_keys]))
 column_config = {}
+
 for col in perf_renomeadas:
     if col in df_display_final.columns:
+        # Garante que a coluna é uma Series antes de chamar to_numeric
         df_display_final[col] = pd.to_numeric(
             df_display_final[col], errors="coerce", downcast="float"
         )
@@ -588,53 +687,72 @@ else:
 # ----------------------------
 # Alertas Top 3 Performance
 # ----------------------------
-st.markdown("## 🚨 Alertas Top 3 Performance")
-intervalos = {
-    "performance.hour": "Hora",
-    "performance.day": "Dia",
-    "performance.week": "Semana",
-    "performance.month": "Mês",
-    "performance.month3": "3 Meses",
-}
+st.markdown("---")
+# Garante que o df_alertas é baseado apenas nos índices filtrados
+df_alertas = df_total.loc[df_display_final.index].copy()
 
-rank_map = {
-    "performance.hour": "rankDiffs.hour",
-    "performance.day": "rankDiffs.day",
-    "performance.week": "rankDiffs.week",
-    "performance.month": "rankDiffs.month",
-    "performance.month3": "rankDiffs.month3",
-}
-
-colunas_essenciais = [
-    "name",
-    "slug",
-    "symbol",
-    "price",
-    "rank",
-    "links",
-    "coingecko_links",
-    "tradingview_links",
-    "tradingview_links_chart",
-] + list(rank_map.values())
-colunas_disponiveis = [col for col in colunas_essenciais if col in df_filtrado.columns]
-
-for key, label in intervalos.items():
-    rank_key = rank_map.get(key)
-
-    # Nota: df_filtrado (sem limite de linhas) é usado aqui para que os alertas usem todos os dados filtrados
+# Adiciona as colunas de performance renomeadas ao df_alertas
+for original_key, renamed_key in renomear.items():
     if (
-        key in df_filtrado.columns
-        and rank_key in df_filtrado.columns
-        and not df_filtrado.empty
+        original_key in df_total.columns
+        and renamed_key in df_display_final.columns
+        and renamed_key not in df_alertas.columns
     ):
-        df_filtrado[key] = pd.to_numeric(df_filtrado[key], errors="coerce")
+        df_alertas[renamed_key] = df_total[original_key].loc[df_alertas.index]
+    # No caso de Market Cap e outras colunas que não são de performance mas foram renomeadas
+    if (
+        original_key != renamed_key
+        and original_key in df_total.columns
+        and renamed_key in df_display_final.columns
+        and renamed_key not in df_alertas.columns
+    ):
+        df_alertas[renomeado_key] = df_total[original_key].loc[df_alertas.index]
 
-        cols_para_selecao = [
-            c for c in colunas_disponiveis if c not in [rank_key, key]
-        ] + [rank_key, key]
 
-        top_altas = df_filtrado.nlargest(3, key)[cols_para_selecao]
-        top_baixas = df_filtrado.nsmallest(3, key)[cols_para_selecao]
+# Mapeamento para as colunas de performance RENOMEADAS (chaves do df_alertas)
+# E suas respectivas colunas de rankDiffs ORIGINAIS (valores do df_alertas)
+intervalos = {
+    "perf.hour": "Hora",
+    "perf.day": "Dia",
+    "perf.week": "Semana",
+    "perf.month": "Mês",
+    "perf.month3": "3 Meses",
+}
+
+rank_map_renomeado = {
+    "perf.hour": "rankDiffs.hour",
+    "perf.day": "rankDiffs.day",
+    "perf.week": "rankDiffs.week",
+    "perf.month": "rankDiffs.month",
+    "perf.month3": "rankDiffs.month3",
+}
+
+st.markdown(
+    f"## 🚨 Alertas Top 3 Performance (Top {len(df_alertas)} de {st.session_state.num_cryptos_table_input} Pedidas)"
+)
+
+for key_renomeada, label in intervalos.items():
+    rank_key_original = rank_map_renomeado.get(key_renomeada)
+
+    if (
+        key_renomeada in df_alertas.columns
+        and rank_key_original in df_alertas.columns
+        and not df_alertas.empty
+    ):
+        df_alertas[key_renomeada] = pd.to_numeric(
+            df_alertas[key_renomeada], errors="coerce"
+        )
+
+        # Garante que a coluna de performance existe e tem valores válidos antes de nlargest/nsmallest
+        if df_alertas[key_renomeada].count() < 3:
+            st.warning(
+                f"⚠️ Dados insuficientes (menos de 3 moedas com valor) para alertas de {label}."
+            )
+            continue
+
+        top_altas = df_alertas.nlargest(3, key_renomeada)
+        top_baixas = df_alertas.nsmallest(3, key_renomeada)
+
         colA, colB = st.columns(2)
         with colA:
             st.markdown(f"### 🟢 Maiores Altas - {label}")
@@ -646,7 +764,7 @@ for key, label in intervalos.items():
                 symbol_display = f"**[{r.get('symbol', 'N/A')}]**"
 
                 current_rank = r.get("rank", "N/A")
-                rank_change = r.get(rank_key)
+                rank_change = r.get(rank_key_original)
                 rank_change_str = (
                     str(int(rank_change)) if not pd.isna(rank_change) else "N/A"
                 )
@@ -663,7 +781,7 @@ for key, label in intervalos.items():
                 else:
                     price_display = f"**{price_text}**"
 
-                perf_text = f"{r.get(key, 0):.2f}%"
+                perf_text = f"{r.get(key_renomeada, 0):.2f}%"
                 if r.get("tradingview_links_chart"):
                     perf_display = (
                         f"**[{perf_text}]({r.get('tradingview_links_chart')})**"
@@ -684,7 +802,7 @@ for key, label in intervalos.items():
                 symbol_display = f"**[{r.get('symbol', 'N/A')}]**"
 
                 current_rank = r.get("rank", "N/A")
-                rank_change = r.get(rank_key)
+                rank_change = r.get(rank_key_original)
                 rank_change_str = (
                     str(int(rank_change)) if not pd.isna(rank_change) else "N/A"
                 )
@@ -701,7 +819,7 @@ for key, label in intervalos.items():
                 else:
                     price_display = f"**{price_text}**"
 
-                perf_text = f"{r.get(key, 0):.2f}%"
+                perf_text = f"{r.get(key_renomeada, 0):.2f}%"
                 if r.get("tradingview_links_chart"):
                     perf_display = (
                         f"**[{perf_text}]({r.get('tradingview_links_chart')})**"
@@ -714,7 +832,7 @@ for key, label in intervalos.items():
                 )
     else:
         st.warning(
-            f"⚠️ Dados insuficientes para alertas de {label} (faltando {key} ou {rank_key})."
+            f"⚠️ Dados insuficientes para alertas de {label} (certifique-se de ter selecionado colunas de performance no filtro e que existam dados no subconjunto filtrado)."
         )
 
 # ----------------------------
@@ -754,16 +872,18 @@ if not df.empty:
     min_values = df_no_stablecoins[perf_keys_available].min(numeric_only=True).round(2)
     max_values = df_no_stablecoins[perf_keys_available].max(numeric_only=True).round(2)
 
-    performance_labels = [
-        "Min15",
-        "Hour",
-        "Hour4",
-        "Day",
-        "Week",
-        "Month",
-        "Month3",
-        "Year",
-    ]
+    performance_labels_map = {
+        "performance.min15": "Min15",
+        "performance.hour": "Hour",
+        "performance.hour4": "Hour4",
+        "performance.day": "Day",
+        "performance.week": "Week",
+        "performance.month": "Month",
+        "performance.month3": "Month3",
+        "performance.year": "Year",
+    }
+    performance_labels = [performance_labels_map[k] for k in perf_keys_available]
+
     stats_df = pd.DataFrame(
         {
             "Média (%)": [f"{val:.2f}%" for val in mean_values],
@@ -793,10 +913,9 @@ else:
     st.warning("⚠️ Não há dados disponíveis para calcular estatísticas.")
 
 # ----------------------------
-# Estatísticas de Desempenho Filtrada (Reintroduzindo o controle aqui)
+# Estatísticas de Desempenho Filtrada
 # ----------------------------
 st.markdown("---")
-# O controle foi movido de volta para esta seção
 num_cryptos = st.number_input(
     "Número de criptomoedas a considerar (1-1000)",
     min_value=1,
@@ -806,12 +925,16 @@ num_cryptos = st.number_input(
     help="Define o número de criptomoedas (ordenadas por Market Cap) usadas no cálculo das estatísticas abaixo. Não afeta a tabela principal.",
 )
 
-st.markdown(f"## 📊 Estatísticas de Desempenho (Top {num_cryptos} - Sem Stablecoins)")
+st.markdown(
+    f"## 📊 Estatísticas de Desempenho (Top {st.session_state.num_cryptos_stats_input} - Sem Stablecoins)"
+)
 if not df_total.empty:
     df_no_stablecoins_filtered = df_total[df_total["stable"] == False].copy()
 
     df_top_cryptos = (
-        df_no_stablecoins_filtered.nlargest(int(num_cryptos), "marketcap", keep="all")
+        df_no_stablecoins_filtered.nlargest(
+            int(st.session_state.num_cryptos_stats_input), "marketcap", keep="all"
+        )
         if "marketcap" in df_no_stablecoins_filtered.columns
         else df_no_stablecoins_filtered
     )
@@ -824,16 +947,18 @@ if not df_total.empty:
     min_values = df_top_cryptos[perf_keys_available].min(numeric_only=True).round(2)
     max_values = df_top_cryptos[perf_keys_available].max(numeric_only=True).round(2)
 
-    performance_labels = [
-        "Min15",
-        "Hour",
-        "Hour4",
-        "Day",
-        "Week",
-        "Month",
-        "Month3",
-        "Year",
-    ]
+    performance_labels_map = {
+        "performance.min15": "Min15",
+        "performance.hour": "Hour",
+        "performance.hour4": "Hour4",
+        "performance.day": "Day",
+        "performance.week": "Week",
+        "performance.month": "Month",
+        "performance.month3": "Month3",
+        "performance.year": "Year",
+    }
+    performance_labels = [performance_labels_map[k] for k in perf_keys_available]
+
     stats_df_filtered = pd.DataFrame(
         {
             "Média (%)": [f"{val:.2f}%" for val in mean_values],

@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import time
+import numpy as np
 
 URL = "https://cryptobubbles.net/backend/data/bubbles1000.usd.json"
 
@@ -11,7 +12,7 @@ URL = "https://cryptobubbles.net/backend/data/bubbles1000.usd.json"
 # ----------------------------
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=60)  # Caching: Dados são estáticos por 60 segundos
 def obter_dados(url=URL):
     """Obtém os dados do Cryptobubbles."""
     response = requests.get(url)
@@ -19,11 +20,53 @@ def obter_dados(url=URL):
     return response.json()
 
 
+def otimizar_dtypes(df):
+    """Reduz o uso de memória do DataFrame alterando os dtypes numéricos."""
+    for col in df.columns:
+        # Apenas para colunas numéricas (inteiro e float)
+        if pd.api.types.is_numeric_dtype(df[col]):
+            c_min = df[col].min()
+            c_max = df[col].max()
+
+            # Tipos de inteiro
+            if pd.api.types.is_integer_dtype(df[col]):
+                if c_min > np.iinfo(np.int32).min and c_max < np.iinfo(np.int32).max:
+                    df[col] = df[col].astype(np.int32)
+                elif c_min > np.iinfo(np.int16).min and c_max < np.iinfo(np.int16).max:
+                    df[col] = df[col].astype(np.int16)
+                elif c_min > np.iinfo(np.int8).min and c_max < np.iinfo(np.int8).max:
+                    df[col] = df[col].astype(np.int8)
+
+            # Tipos de ponto flutuante
+            elif pd.api.types.is_float_dtype(df[col]):
+                # Cuidado: Reduzir para float16 pode perder precisão (price usa até 8 casas)
+                # Mantemos float32 (ou float64) para 'price', mas tentamos float32 para as outras.
+
+                # Exemplo para Performance (com 2 casas decimais)
+                if "performance" in col or "dominance" in col or "volume" in col:
+                    # Garante que não há NaNs antes de checar os limites para float
+                    df[col] = df[col].fillna(
+                        0
+                    )  # Trata NaNs temporariamente para downcast
+
+                    if (
+                        c_min > np.finfo(np.float32).min
+                        and c_max < np.finfo(np.float32).max
+                    ):
+                        df[col] = df[col].astype(np.float32)
+
+                    # Se 'price' precisa de alta precisão (8 casas), mantenha o original ou float64
+                    # O downcasting de float é mais complexo devido à precisão.
+
+    return df
+
+
+@st.cache_data  # Caching: Normaliza o JSON APENAS se os dados de entrada mudarem
 def normalizar_json(dados):
     """Normaliza o JSON e adiciona a coluna de rank."""
     df = pd.json_normalize(dados, sep=".")
     df["rank"] = df["marketcap"].rank(method="min", ascending=False).astype(int)
-    return df
+    return otimizar_dtypes(df)  # return df
 
 
 def converter_para_excel(df):

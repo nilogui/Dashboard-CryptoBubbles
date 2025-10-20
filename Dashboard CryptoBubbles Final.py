@@ -12,7 +12,7 @@ URL = "https://cryptobubbles.net/backend/data/bubbles1000.usd.json"
 # ----------------------------
 
 
-@st.cache_data(ttl=60)  # Caching: Dados são estáticos por 60 segundos
+@st.cache_data(ttl=120)  # Caching: Dados são estáticos por 120 segundos
 def obter_dados(url=URL):
     """Obtém os dados do Cryptobubbles."""
     response = requests.get(url)
@@ -1034,6 +1034,6 @@ else:
 # Loop de atualização automática
 # ----------------------------
 st.markdown("---")
-st.write(f"Atualizando automaticamente em 60 segundos...")
-time.sleep(60)
+st.write(f"Atualizando automaticamente em 120 segundos...")
+time.sleep(120)
 st.rerun()

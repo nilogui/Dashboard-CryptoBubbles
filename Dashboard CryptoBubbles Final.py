@@ -589,7 +589,7 @@ renomear = {
     "performance.month3": "perf.month3",
     "performance.year": "perf.year",
     "marketcap": "Market Cap",
-    "coingecko_links": "CoinGecko",
+    "coingecko_links": "CGecko",
     "tradingview_links": "TView (F)",
     "tradingview_links_chart": "TView (C)",
 }
@@ -689,11 +689,11 @@ if "volume" in df_display_final.columns:
     )
 if "links" in df_display_final.columns:
     column_config["links"] = st.column_config.LinkColumn(
-        "CoinMarketCap", help="Link para o CoinMarketCap", display_text="Ver"
+        "CMCap", help="Link para o CoinMarketCap", display_text="Ver"
     )
-if "CoinGecko" in df_display_final.columns:
-    column_config["CoinGecko"] = st.column_config.LinkColumn(
-        "CoinGecko", help="Link para o CoinGecko", display_text="Ver"
+if "CGecko" in df_display_final.columns:
+    column_config["CGecko"] = st.column_config.LinkColumn(
+        "CGecko", help="Link para o CoinGecko", display_text="Ver"
     )
 if "TView (F)" in df_display_final.columns:
     column_config["TView (F)"] = st.column_config.LinkColumn(
